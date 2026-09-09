@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>To-Do</title>
+  <style>
+    :root {
+      --primary: #ae94ef;
+      --primary-dark: #9678e8;
+      --primary-soft: #f3eefe;
+      --bg: #faf8ff;
+      --text: #2e2a3a;
+      --muted: #8b849c;
+      --danger: #e57373;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      padding: 48px 16px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 480px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin: 0 0 24px;
+      color: var(--primary-dark);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    h1::before {
+      content: "";
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      background: var(--primary);
+    }
+
+    .input-box {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid #e5def9;
+      border-radius: 10px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color .15s;
+      background: #fff;
+      font-family: inherit;
+      resize: vertical;
+    }
+
+    input[type="text"]:focus, textarea:focus { border-color: var(--primary); }
+
+    button {
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      border-radius: 10px;
+      transition: background .15s, opacity .15s;
+    }
+
+    .add-btn {
+      padding: 12px 20px;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+    }
+    .add-btn:hover { background: var(--primary-dark); }
+
+    #error {
+      display: none;
+      background: #fdecec;
+      color: var(--danger);
+      border: 1px solid #f6c9c9;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: .9rem;
+      margin-bottom: 16px;
+    }
+
+    ul { list-style: none; padding: 0; margin: 0; }
+
+    li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: #fff;
+      border: 1px solid #eee6fb;
+      padding: 12px 14px;
+      border-radius: 12px;
+      margin-bottom: 10px;
+    }
+
+    li input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      accent-color: var(--primary);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .content {
+      flex: 1;
+      min-width: 0;
+    }
+    .title {
+      font-size: 1rem;
+      word-break: break-all;
+    }
+    .title.done {
+      text-decoration: line-through;
+      color: var(--muted);
+    }
+    .desc {
+      font-size: .85rem;
+      color: var(--muted);
+      margin-top: 3px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .title-edit {
+      flex: 1;
+      padding: 6px 8px;
+      border: 1.5px solid var(--primary);
+      border-radius: 8px;
+      font-size: 1rem;
+    }
+
+    .icon-btn {
+      background: var(--primary-soft);
+      color: var(--primary-dark);
+      padding: 6px 12px;
+      font-size: .85rem;
+      font-weight: 600;
+    }
+    .icon-btn:hover { background: #e8e0fb; }
+
+    .del-btn {
+      background: #fdecec;
+      color: var(--danger);
+      padding: 6px 12px;
+      font-size: .85rem;
+      font-weight: 600;
+    }
+    .del-btn:hover { background: #fbdcdc; }
+
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 32px 0;
+      font-size: .95rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>To-Do</h1>
+
+    <div class="input-box">
+      <input type="text" id="new-title" placeholder="제목" />
+      <textarea id="new-desc" placeholder="설명 (선택)" rows="2"></textarea>
+      <button class="add-btn" id="add-btn">추가</button>
+    </div>
+
+    <div id="error"></div>
+
+    <ul id="list"></ul>
+  </div>
+
+  <script>
+    const API = "/todos";
+    const listEl = document.getElementById("list");
+    const inputEl = document.getElementById("new-title");
+    const descEl = document.getElementById("new-desc");
+    const errorEl = document.getElementById("error");
+
+    function showError(msg) {
+      errorEl.textContent = "오류: " + msg;
+      errorEl.style.display = "block";
+    }
+    function clearError() {
+      errorEl.style.display = "none";
+    }
+
+    // 목록 조회 후 다시 그리기
+    async function loadTodos() {
+      clearError();
+      try {
+        const res = await fetch(API);
+        if (!res.ok) throw new Error(`목록을 불러오지 못했습니다 (${res.status})`);
+        const todos = await res.json();
+        render(todos);
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+
+    function render(todos) {
+      listEl.innerHTML = "";
+      if (todos.length === 0) {
+        listEl.innerHTML = '<div class="empty">할 일이 없습니다. 위에서 추가해 보세요.</div>';
+        return;
+      }
+      for (const todo of todos) {
+        listEl.appendChild(makeRow(todo));
+      }
+    }
+
+    function makeRow(todo) {
+      const li = document.createElement("li");
+
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = todo.done;
+      check.onchange = () =>
+        updateTodo(todo.id, {
+          title: todo.title,
+          description: todo.description,
+          done: check.checked,
+        });
+
+      const content = document.createElement("div");
+      content.className = "content";
+
+      const title = document.createElement("div");
+      title.className = "title" + (todo.done ? " done" : "");
+      title.textContent = todo.title;
+      content.appendChild(title);
+
+      if (todo.description) {
+        const desc = document.createElement("div");
+        desc.className = "desc";
+        desc.textContent = todo.description;
+        content.appendChild(desc);
+      }
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "icon-btn";
+      editBtn.textContent = "수정";
+      editBtn.onclick = () => startEdit(li, todo);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "del-btn";
+      delBtn.textContent = "삭제";
+      delBtn.onclick = () => deleteTodo(todo.id);
+
+      li.append(check, content, editBtn, delBtn);
+      return li;
+    }
+
+    // 수정 모드로 전환
+    function startEdit(li, todo) {
+      li.innerHTML = "";
+
+      const fields = document.createElement("div");
+      fields.className = "content";
+
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.className = "title-edit";
+      titleInput.value = todo.title;
+
+      const descInput = document.createElement("textarea");
+      descInput.className = "title-edit";
+      descInput.rows = 2;
+      descInput.placeholder = "설명 (선택)";
+      descInput.value = todo.description || "";
+      descInput.style.marginTop = "6px";
+
+      fields.append(titleInput, descInput);
+
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "icon-btn";
+      saveBtn.textContent = "저장";
+      saveBtn.onclick = () => {
+        const newTitle = titleInput.value.trim();
+        if (!newTitle) return showError("제목은 비워둘 수 없습니다.");
+        updateTodo(todo.id, {
+          title: newTitle,
+          description: descInput.value.trim(),
+          done: todo.done,
+        });
+      };
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "del-btn";
+      cancelBtn.textContent = "취소";
+      cancelBtn.onclick = loadTodos;
+
+      titleInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") saveBtn.click();
+        if (e.key === "Escape") loadTodos();
+      });
+
+      li.append(fields, saveBtn, cancelBtn);
+      titleInput.focus();
+    }
+
+    // 항목 추가
+    let isSubmitting = false; // 전송 중 중복 요청 방지 플래그
+    async function addTodo() {
+      if (isSubmitting) return; // 이미 보내는 중이면 무시
+      clearError();
+      const title = inputEl.value.trim();
+      const description = descEl.value.trim();
+      if (!title) return showError("제목을 입력해 주세요.");
+
+      const addBtn = document.getElementById("add-btn");
+      isSubmitting = true;
+      addBtn.disabled = true;
+      try {
+        const res = await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, description, done: false }),
+        });
+        if (!res.ok) throw new Error(`추가에 실패했습니다 (${res.status})`);
+        inputEl.value = "";
+        descEl.value = "";
+        await loadTodos(); // 추가 후 리스트 다시 불러오기
+      } catch (e) {
+        showError(e.message);
+      } finally {
+        isSubmitting = false;
+        addBtn.disabled = false;
+      }
+    }
+
+    // 항목 수정
+    async function updateTodo(id, data) {
+      clearError();
+      try {
+        const res = await fetch(`${API}/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error(`수정에 실패했습니다 (${res.status})`);
+        await loadTodos();
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+
+    // 항목 삭제
+    async function deleteTodo(id) {
+      clearError();
+      try {
+        const res = await fetch(`${API}/${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(`삭제에 실패했습니다 (${res.status})`);
+        await loadTodos();
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+
+    document.getElementById("add-btn").onclick = addTodo;
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") addTodo();
+    });
+
+    loadTodos();
+  </script>
+</body>
+</html>
