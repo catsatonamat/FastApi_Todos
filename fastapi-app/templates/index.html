@@ -191,8 +191,42 @@
     <ul id="list"></ul>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
   <script>
     const API = "/todos";
+
+    // 완료 체크 시 화면 전체에 폭죽 효과
+    function fireConfetti() {
+      const duration = 1500;
+      const end = Date.now() + duration;
+      const colors = ["#ae94ef", "#9678e8", "#f3eefe", "#ffd166", "#ef476f", "#06d6a0"];
+
+      (function frame() {
+        confetti({
+          particleCount: 4,
+          angle: 60,
+          spread: 65,
+          origin: { x: 0, y: 0.6 },
+          colors,
+        });
+        confetti({
+          particleCount: 4,
+          angle: 120,
+          spread: 65,
+          origin: { x: 1, y: 0.6 },
+          colors,
+        });
+        if (Date.now() < end) requestAnimationFrame(frame);
+      })();
+
+      confetti({
+        particleCount: 150,
+        spread: 100,
+        startVelocity: 45,
+        origin: { x: 0.5, y: 0.5 },
+        colors,
+      });
+    }
     const listEl = document.getElementById("list");
     const inputEl = document.getElementById("new-title");
     const descEl = document.getElementById("new-desc");
@@ -236,12 +270,14 @@
       const check = document.createElement("input");
       check.type = "checkbox";
       check.checked = todo.done;
-      check.onchange = () =>
+      check.onchange = () => {
+        if (check.checked) fireConfetti();
         updateTodo(todo.id, {
           title: todo.title,
           description: todo.description,
           done: check.checked,
         });
+      };
 
       const content = document.createElement("div");
       content.className = "content";
