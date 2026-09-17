@@ -52,6 +52,12 @@
       background: var(--primary);
     }
 
+    .count {
+      color: var(--muted);
+      font-size: .9rem;
+      margin: -12px 0 20px;
+    }
+
     .input-box {
       display: flex;
       flex-direction: column;
@@ -179,6 +185,7 @@
 <body>
   <div class="app">
     <h1>To-Do</h1>
+    <div class="count" id="count"></div>
 
     <div class="input-box">
       <input type="text" id="new-title" placeholder="제목" />
@@ -231,6 +238,7 @@
     const inputEl = document.getElementById("new-title");
     const descEl = document.getElementById("new-desc");
     const errorEl = document.getElementById("error");
+    const countEl = document.getElementById("count");
 
     function showError(msg) {
       errorEl.textContent = "오류: " + msg;
@@ -254,6 +262,12 @@
     }
 
     function render(todos) {
+      const remaining = todos.filter((t) => !t.done).length;
+      countEl.textContent =
+        todos.length === 0
+          ? ""
+          : `해야 할 일 ${remaining}개 (총 ${todos.length}개)`;
+
       listEl.innerHTML = "";
       if (todos.length === 0) {
         listEl.innerHTML = '<div class="empty">할 일이 없습니다. 위에서 추가해 보세요.</div>';
