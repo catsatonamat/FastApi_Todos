@@ -65,7 +65,7 @@
       margin-bottom: 20px;
     }
 
-    input[type="text"], textarea {
+    input[type="text"], input[type="date"], textarea {
       width: 100%;
       padding: 12px 14px;
       border: 1.5px solid #e5def9;
@@ -78,7 +78,7 @@
       resize: vertical;
     }
 
-    input[type="text"]:focus, textarea:focus { border-color: var(--primary); }
+    input[type="text"]:focus, input[type="date"]:focus, textarea:focus { border-color: var(--primary); }
 
     button {
       border: none;
@@ -170,6 +170,16 @@
       word-break: break-all;
     }
 
+    .due {
+      font-size: .8rem;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+    .due.overdue {
+      color: var(--danger);
+      font-weight: 600;
+    }
+
     .title-edit {
       flex: 1;
       padding: 6px 8px;
@@ -212,6 +222,7 @@
     <div class="input-box">
       <input type="text" id="new-title" placeholder="제목" />
       <textarea id="new-desc" placeholder="설명 (선택)" rows="2"></textarea>
+      <input type="date" id="new-due" title="마감일 (선택)" />
       <button class="add-btn" id="add-btn">추가</button>
     </div>
 
@@ -259,6 +270,7 @@
     const listEl = document.getElementById("list");
     const inputEl = document.getElementById("new-title");
     const descEl = document.getElementById("new-desc");
+    const dueEl = document.getElementById("new-due");
     const errorEl = document.getElementById("error");
     const countEl = document.getElementById("count");
 
@@ -268,6 +280,12 @@
     }
     function clearError() {
       errorEl.style.display = "none";
+    }
+
+    function todayISO() {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     }
 
     // 서버에서 받아온(order 순 정렬된) 최신 목록
@@ -352,6 +370,7 @@
           description: todo.description,
           done: check.checked,
           order: todo.order,
+          due_date: todo.due_date,
         });
       };
 
@@ -368,6 +387,14 @@
         desc.className = "desc";
         desc.textContent = todo.description;
         content.appendChild(desc);
+      }
+
+      if (todo.due_date) {
+        const due = document.createElement("div");
+        const overdue = !todo.done && todo.due_date < todayISO();
+        due.className = "due" + (overdue ? " overdue" : "");
+        due.textContent = `마감: ${todo.due_date}${overdue ? " (기한 초과)" : ""}`;
+        content.appendChild(due);
       }
 
       const editBtn = document.createElement("button");
@@ -403,7 +430,14 @@
       descInput.value = todo.description || "";
       descInput.style.marginTop = "6px";
 
-      fields.append(titleInput, descInput);
+      const dueInput = document.createElement("input");
+      dueInput.type = "date";
+      dueInput.className = "title-edit";
+      dueInput.title = "마감일 (선택)";
+      dueInput.value = todo.due_date || "";
+      dueInput.style.marginTop = "6px";
+
+      fields.append(titleInput, descInput, dueInput);
 
       const saveBtn = document.createElement("button");
       saveBtn.className = "icon-btn";
@@ -416,6 +450,7 @@
           description: descInput.value.trim(),
           done: todo.done,
           order: todo.order,
+          due_date: dueInput.value || null,
         });
       };
 
@@ -449,11 +484,12 @@
         const res = await fetch(API, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, description, done: false }),
+          body: JSON.stringify({ title, description, done: false, due_date: dueEl.value || null }),
         });
         if (!res.ok) throw new Error(`추가에 실패했습니다 (${res.status})`);
         inputEl.value = "";
         descEl.value = "";
+        dueEl.value = "";
         await loadTodos(); // 추가 후 리스트 다시 불러오기
       } catch (e) {
         showError(e.message);

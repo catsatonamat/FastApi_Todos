@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import date, timedelta
 from pathlib import Path
 
 import httpx2
@@ -194,3 +195,44 @@ def test_items_persist_after_reload(page: Page):
     page.wait_for_load_state("networkidle")
     expect(row(page, "새로고침 전")).to_be_visible()
     expect(page.locator("#count")).to_have_text("해야 할 일 1개 (총 1개)")
+
+
+# ---------- 마감일 ----------
+
+def add_todo_with_due(page: Page, title: str, due: str):
+    page.fill("#new-title", title)
+    page.fill("#new-due", due)
+    page.click("#add-btn")
+    expect(row(page, title)).to_be_visible()
+
+
+def test_due_date_is_shown_on_row(page: Page):
+    add_todo_with_due(page, "보고서 제출", "2099-12-31")
+    due = row(page, "보고서 제출").locator(".due")
+    expect(due).to_have_text("마감: 2099-12-31")
+    expect(due).not_to_have_class(re.compile(r"\boverdue\b"))
+    snap(page, "09_due_date")
+
+
+def test_overdue_due_date_is_highlighted(page: Page):
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    add_todo_with_due(page, "지난 일정", yesterday)
+    due = row(page, "지난 일정").locator(".due")
+    expect(due).to_have_class(re.compile(r"\boverdue\b"))
+    expect(due).to_contain_text("기한 초과")
+    snap(page, "10_overdue")
+
+
+def test_done_item_is_not_marked_overdue(page: Page):
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    add_todo_with_due(page, "끝난 일정", yesterday)
+    row(page, "끝난 일정").locator("input[type=checkbox]").check()
+    expect(row(page, "끝난 일정").locator(".due")).not_to_have_class(re.compile(r"\boverdue\b"))
+
+
+def test_edit_due_date_saves(page: Page):
+    add_todo_with_due(page, "수정할 일정", "2099-01-01")
+    row(page, "수정할 일정").get_by_role("button", name="수정").click()
+    page.locator("input[type=date].title-edit").fill("2099-06-30")
+    page.get_by_role("button", name="저장").click()
+    expect(row(page, "수정할 일정").locator(".due")).to_have_text("마감: 2099-06-30")

@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -49,8 +50,8 @@ def test_todo_item_requires_id():
 
 
 def test_todo_item_keeps_all_fields():
-    item = TodoItem(id=5, title="T", description="D", done=True, order=3)
-    assert item.model_dump() == {"id": 5, "title": "T", "description": "D", "done": True, "order": 3}
+    item = TodoItem(id=5, title="T", description="D", done=True, order=3, due_date="2026-01-02")
+    assert item.model_dump() == {"id": 5, "title": "T", "description": "D", "done": True, "order": 3, "due_date": date(2026, 1, 2)}
 
 
 # ---------- 상태관리 (JSON 파일 저장/로드) ----------
@@ -267,3 +268,63 @@ def test_repeated_moves_keep_orders_unique():
         client.put("/todos/1/move", params={"direction": "down"})
     orders = [t["order"] for t in load_todos()]
     assert sorted(orders) == [0, 1, 2, 3]
+
+
+# ---------- 마감일 (due_date) ----------
+
+def test_todo_in_due_date_defaults_to_none():
+    assert TodoIn(title="Test").due_date is None
+
+
+def test_todo_in_rejects_invalid_due_date():
+    with pytest.raises(ValidationError):
+        TodoIn(title="Test", due_date="2026-13-45")
+
+
+def test_create_todo_with_due_date_stores_iso_string():
+    response = client.post("/todos", json={"title": "Test", "due_date": "2026-10-10"})
+    assert response.status_code == 201
+    assert response.json()["due_date"] == "2026-10-10"
+    saved = json.loads(main.DATA_FILE.read_text(encoding="utf-8"))
+    assert saved[0]["due_date"] == "2026-10-10"
+
+
+def test_create_todo_without_due_date_is_null():
+    response = client.post("/todos", json={"title": "Test"})
+    assert response.json()["due_date"] is None
+
+
+def test_create_todo_invalid_due_date_returns_422():
+    response = client.post("/todos", json={"title": "Test", "due_date": "not-a-date"})
+    assert response.status_code == 422
+
+
+def test_update_todo_sets_due_date_and_persists():
+    save_todos([make_todo(1, "Test")])
+    response = client.put("/todos/1", json={"title": "Test", "due_date": "2027-01-01"})
+    assert response.status_code == 200
+    assert response.json()["due_date"] == "2027-01-01"
+    assert load_todos()[0]["due_date"] == "2027-01-01"
+
+
+def test_update_todo_clears_due_date_with_null():
+    save_todos([{**make_todo(1, "Test"), "due_date": "2027-01-01"}])
+    response = client.put("/todos/1", json={"title": "Test", "due_date": None})
+    assert response.json()["due_date"] is None
+    assert load_todos()[0]["due_date"] is None
+
+
+def test_legacy_item_without_due_date_reads_as_null():
+    save_todos([make_todo(1, "Old")])
+    response = client.get("/todos")
+    assert response.json()[0]["due_date"] is None
+
+
+def test_move_keeps_due_date():
+    save_todos([
+        {**make_todo(1, "A", order=0), "due_date": "2027-02-02"},
+        make_todo(2, "B", order=1),
+    ])
+    client.put("/todos/2/move", params={"direction": "up"})
+    moved_a = next(t for t in load_todos() if t["id"] == 1)
+    assert moved_a["due_date"] == "2027-02-02"

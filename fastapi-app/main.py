@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -20,6 +21,7 @@ class TodoIn(BaseModel):
     description: str = ""
     done: bool = False
     order: int = 0
+    due_date: date | None = None
 
 
 class TodoItem(TodoIn):
@@ -93,7 +95,7 @@ def create_todo(todo: TodoIn):
         order=next_order(todos),
         **todo.model_dump(exclude={"order"}),
     )
-    todos.append(item.model_dump())
+    todos.append(item.model_dump(mode="json"))
     save_todos(todos)
     return item
 
@@ -105,7 +107,7 @@ def update_todo(todo_id: int, todo: TodoIn):
     for i, t in enumerate(todos):
         if t["id"] == todo_id:
             updated = TodoItem(id=todo_id, **todo.model_dump())
-            todos[i] = updated.model_dump()
+            todos[i] = updated.model_dump(mode="json")
             save_todos(todos)
             return updated
     raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
