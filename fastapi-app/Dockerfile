@@ -18,8 +18,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# 소스 복사 (앱이 todo.json을 수정할 수 있도록 소유자를 appuser로 지정)
-COPY --chown=appuser:appuser . .
+# 실행에 필요한 파일만 명시해서 복사 (테스트·보고서·설정 파일이 이미지에 섞여 들어가지 않도록 `COPY . .` 대신 사용)
+# 앱이 todo.json을 수정할 수 있도록 소유자를 appuser로 지정
+COPY --chown=appuser:appuser main.py todo.json ./
+COPY --chown=appuser:appuser templates/ ./templates/
 
 # 이후 명령은 appuser 권한으로 실행
 USER appuser
