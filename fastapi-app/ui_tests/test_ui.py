@@ -183,6 +183,8 @@ def test_drag_up_reorders_list(page: Page):
 
 
 def test_drag_across_multiple_rows(page: Page):
+    # 드래그 도중 Playwright가 대상 행으로 스크롤하면 잡은 위치가 어긋나므로, 네 행이 한 화면에 들어오게 한다
+    page.set_viewport_size({"width": 1280, "height": 1200})
     for title in ("A", "B", "C", "D"):
         add_todo(page, title)
     drag_below(page, "A", "D")
@@ -245,7 +247,8 @@ def add_todo_with_due(page: Page, title: str, due: str):
 def test_due_date_is_shown_on_row(page: Page):
     add_todo_with_due(page, "보고서 제출", "2099-12-31")
     due = row(page, "보고서 제출").locator(".due")
-    expect(due).to_have_text("마감: 2099-12-31")
+    expect(due).to_have_text(f"D-{(date(2099, 12, 31) - date.today()).days}")
+    expect(due).to_have_attribute("title", "마감: 2099-12-31")
     expect(due).not_to_have_class(re.compile(r"\boverdue\b"))
     snap(page, "09_due_date")
 
@@ -255,8 +258,16 @@ def test_overdue_due_date_is_highlighted(page: Page):
     add_todo_with_due(page, "지난 일정", yesterday)
     due = row(page, "지난 일정").locator(".due")
     expect(due).to_have_class(re.compile(r"\boverdue\b"))
-    expect(due).to_contain_text("기한 초과")
+    expect(due).to_have_text("D+1")
+    expect(due).to_have_attribute("title", re.compile("기한 초과"))
     snap(page, "10_overdue")
+
+
+def test_due_today_is_shown_as_d_0(page: Page):
+    add_todo_with_due(page, "오늘 마감", date.today().isoformat())
+    due = row(page, "오늘 마감").locator(".due")
+    expect(due).to_have_text("D-0")
+    expect(due).not_to_have_class(re.compile(r"\boverdue\b"))
 
 
 def test_done_item_is_not_marked_overdue(page: Page):
@@ -271,4 +282,4 @@ def test_edit_due_date_saves(page: Page):
     row(page, "수정할 일정").get_by_role("button", name="수정").click()
     page.locator("input[type=date].title-edit").fill("2099-06-30")
     page.get_by_role("button", name="저장").click()
-    expect(row(page, "수정할 일정").locator(".due")).to_have_text("마감: 2099-06-30")
+    expect(row(page, "수정할 일정").locator(".due")).to_have_attribute("title", "마감: 2099-06-30")

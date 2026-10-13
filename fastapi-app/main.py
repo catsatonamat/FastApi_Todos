@@ -1,11 +1,11 @@
 import json
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints
 
 app = FastAPI(title="To-Do API")
 
@@ -13,20 +13,36 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_FILE = BASE_DIR / "todo.json"
 TEMPLATES_DIR = BASE_DIR / "templates"
 
+# 입력 제한 (디스크·메모리 소진 방지)
+MAX_TITLE_LENGTH = 200
+MAX_DESCRIPTION_LENGTH = 2000
+MAX_ORDER = 100_000
+MAX_TODOS = 1000
+
 
 # ---------- Pydantic 모델 ----------
 class TodoIn(BaseModel):
-    """클라이언트가 보내는 입력용 모델 (id 없음)."""
+    """클라이언트가 보내는 입력용 모델 (id 없음). 길이·범위 제한을 건다."""
+    # 앞뒤 공백을 제거한 뒤 검사하므로 공백만 있는 제목도 거부된다
+    title: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_TITLE_LENGTH),
+    ]
+    description: str = Field(default="", max_length=MAX_DESCRIPTION_LENGTH)
+    done: bool = False
+    order: int = Field(default=0, ge=0, le=MAX_ORDER)
+    due_date: date | None = None
+
+
+class TodoItem(BaseModel):
+    """서버가 반환하는 출력용 모델 (id 포함).
+    TodoIn을 상속하지 않아, 제한을 두기 전에 저장된 항목도 그대로 조회된다."""
+    id: int
     title: str
     description: str = ""
     done: bool = False
     order: int = 0
     due_date: date | None = None
-
-
-class TodoItem(TodoIn):
-    """서버가 반환하는 출력용 모델 (id 포함)."""
-    id: int
 
 
 # ---------- JSON 파일 읽기/쓰기 헬퍼 ----------
@@ -90,6 +106,11 @@ def read_todos():
 def create_todo(todo: TodoIn):
     """새 To-Do 항목 추가 (Create). 서버가 id와 순서(order)를 부여한다."""
     todos = load_todos()
+    if len(todos) >= MAX_TODOS:
+        raise HTTPException(
+            status_code=409,
+            detail=f"할 일은 최대 {MAX_TODOS}개까지 저장할 수 있습니다.",
+        )
     item = TodoItem(
         id=next_id(todos),
         order=next_order(todos),

@@ -4,38 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>To-Do</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&display=swap" />
   <style>
     :root {
-      color-scheme: light dark;
-      --primary: #0071e3;
-      --primary-dark: #0077ed;
-      --primary-soft: rgba(0, 113, 227, .1);
-      --bg: #f5f5f7;
-      --card: #ffffff;
-      --text: #1d1d1f;
-      --muted: #6e6e73;
-      --line: rgba(60, 60, 67, .16);
-      --ring: #c7c7cc;
-      --danger: #ff3b30;
-      --danger-soft: rgba(255, 59, 48, .1);
-      --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 8px 24px rgba(0, 0, 0, .04);
-    }
+      --primary: #8f80f0;
+      --primary-dark: #7566e4;
+      --primary-light: #b3a8f8;
+      --primary-soft: #ebe8fd;
+      --bg: #f4f2ff;
+      --clay: #fbfaff;
+      --text: #3b3566;
+      --muted: #8d87b3;
+      --danger: #ee7f96;
+      --danger-soft: #ffe6ec;
+      --shade: 124, 108, 230; /* 그림자에 쓰는 보라색 (r, g, b) */
 
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --primary: #0a84ff;
-        --primary-dark: #409cff;
-        --primary-soft: rgba(10, 132, 255, .18);
-        --bg: #000000;
-        --card: #1c1c1e;
-        --text: #f5f5f7;
-        --muted: #98989d;
-        --line: rgba(84, 84, 88, .65);
-        --ring: #48484a;
-        --danger: #ff453a;
-        --danger-soft: rgba(255, 69, 58, .18);
-        --shadow: none;
-      }
+      /* 폭신하게 솟은 면: 아래로 떨어지는 그림자 + 위쪽 하이라이트 + 아래쪽 음영 */
+      --puffy:
+        0 14px 28px rgba(var(--shade), .2),
+        0 3px 6px rgba(var(--shade), .1),
+        inset 0 3px 5px rgba(255, 255, 255, .95),
+        inset 0 -6px 10px rgba(var(--shade), .12);
+      /* 눌려 들어간 면 */
+      --pressed:
+        inset 0 4px 8px rgba(var(--shade), .22),
+        inset 0 -3px 4px rgba(255, 255, 255, .9);
+      --bounce: cubic-bezier(.34, 1.56, .64, 1);
+      --display-font: "Jua", ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold",
+        "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      --body-font: "Gowun Dodum", ui-rounded, "SF Pro Rounded",
+        "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
     }
 
     * { box-sizing: border-box; }
@@ -43,185 +43,259 @@
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-        "Apple SD Gothic Neo", "Helvetica Neue", "Segoe UI", Roboto, "Malgun Gothic", sans-serif;
-      font-size: 17px;
-      line-height: 1.35;
-      letter-spacing: -.01em;
-      -webkit-font-smoothing: antialiased;
-      background: var(--bg);
+      font-family: var(--body-font);
+      font-size: 16px;
+      line-height: 1.4;
       color: var(--text);
+      /* 연보라 그라데이션 위에 흰 점무늬 */
+      background:
+        radial-gradient(rgba(255, 255, 255, .75) 2px, transparent 2.5px) 0 0 / 26px 26px,
+        linear-gradient(135deg, #fbfaff 0%, #ebe7ff 45%, #c4bcf8 100%);
+      background-attachment: fixed;
       display: flex;
       justify-content: center;
-      padding: 64px 16px;
+      align-items: flex-start;
+      padding: 48px 16px;
     }
 
+    /* 앱 전체를 감싸는 폭신한 창 */
     .app {
+      position: relative;
       width: 100%;
-      max-width: 520px;
+      max-width: 920px;
+      padding: 58px 28px 30px;
+      background: var(--bg);
+      border-radius: 40px;
+      box-shadow:
+        0 30px 60px rgba(var(--shade), .28),
+        0 6px 12px rgba(var(--shade), .12),
+        inset 0 4px 6px rgba(255, 255, 255, 1),
+        inset 0 -10px 16px rgba(var(--shade), .14);
+    }
+    /* 창 왼쪽 위의 점 세 개 */
+    .app::before {
+      content: "";
+      position: absolute;
+      top: 24px;
+      left: 28px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--primary-light);
+      box-shadow:
+        22px 0 0 var(--primary-light),
+        44px 0 0 var(--primary-light);
+      opacity: .85;
     }
 
     h1 {
-      font-size: 2.5rem;
-      font-weight: 700;
-      letter-spacing: -.03em;
+      font-family: var(--display-font);
+      font-size: 2.3rem;
+      font-weight: 400;
       line-height: 1.1;
-      margin: 0 0 6px;
+      margin: 0 0 8px;
+      color: var(--primary-dark);
+      text-shadow: 0 3px 0 #fff, 0 8px 14px rgba(var(--shade), .3);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    /* 제목 옆의 말랑한 체크 아이콘 */
+    h1::before {
+      content: "";
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+      border-radius: 14px;
+      background:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M11 21l6 6 12-13' fill='none' stroke='%23fff' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% no-repeat,
+        linear-gradient(160deg, var(--primary-light), var(--primary-dark));
+      box-shadow:
+        0 8px 14px rgba(var(--shade), .4),
+        inset 0 3px 4px rgba(255, 255, 255, .5),
+        inset 0 -5px 7px rgba(70, 50, 190, .35);
+      transform: rotate(-8deg);
     }
 
     .count {
       color: var(--muted);
       font-size: .95rem;
-      min-height: 1.35em;
-      margin: 0 0 28px;
+      min-height: 1.4em;
+      margin: 0 0 22px;
     }
 
-    /* 입력 영역: 구분선으로 나뉜 한 장의 카드 */
+    /* 왼쪽 목록, 오른쪽 입력 영역의 2단 배치 */
+    .columns {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+      gap: 26px;
+      align-items: start;
+    }
+
     .input-box {
-      background: var(--card);
-      border-radius: 14px;
-      box-shadow: var(--shadow);
-      margin-bottom: 28px;
-      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 18px;
+      position: sticky; /* 목록이 길어져 스크롤해도 입력 영역은 따라온다 */
+      top: 24px;
+      background: var(--clay);
+      border-radius: 28px;
+      box-shadow: var(--puffy);
     }
 
+    /* 입력칸은 눌려 들어간 모양 */
     input[type="text"], input[type="date"], textarea {
-      display: block;
       width: 100%;
-      padding: 13px 16px;
+      padding: 12px 16px;
       border: none;
-      border-radius: 0;
+      border-radius: 18px;
       font-size: 1rem;
       font-family: inherit;
-      letter-spacing: inherit;
       color: var(--text);
-      background: transparent;
+      background: var(--primary-soft);
+      box-shadow: var(--pressed);
       outline: none;
       resize: vertical;
+      transition: box-shadow .2s, background .2s;
     }
-    input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
+    input::placeholder, textarea::placeholder { color: var(--muted); }
+    input[type="text"]:focus, input[type="date"]:focus, textarea:focus {
+      background: #fff;
+      box-shadow: var(--pressed), 0 0 0 3px var(--primary-light);
+    }
+    input[type="date"] { color: var(--muted); }
 
-    .input-box input, .input-box textarea { border-bottom: 1px solid var(--line); }
-    .input-box input:focus, .input-box textarea:focus { background: var(--primary-soft); }
-    .input-box input[type="date"] { color: var(--muted); }
-
+    /* 버튼: 누르면 꾹 들어갔다가 튕겨 나온다 */
     button {
       border: none;
       cursor: pointer;
+      font-family: var(--display-font);
       font-size: 1rem;
-      font-family: inherit;
-      letter-spacing: inherit;
-      border-radius: 980px;
-      transition: background .15s, opacity .15s, transform .1s;
+      border-radius: 999px;
+      transition: transform .25s var(--bounce), box-shadow .2s, filter .2s;
     }
-    button:active { transform: scale(.97); }
-    button:focus-visible { outline: 3px solid var(--primary-soft); outline-offset: 1px; }
+    button:hover { transform: translateY(-2px) scale(1.03); }
+    button:active { transform: translateY(2px) scale(.94); transition-duration: .08s; }
+    button:focus-visible { outline: 3px solid var(--primary-light); outline-offset: 2px; }
 
     .add-btn {
-      display: block;
-      width: calc(100% - 24px);
-      margin: 12px;
-      padding: 11px 20px;
-      background: var(--primary);
+      padding: 13px 20px;
+      font-size: 1.1rem;
       color: #fff;
-      font-weight: 600;
+      background: linear-gradient(180deg, var(--primary-light), var(--primary-dark));
+      box-shadow:
+        0 10px 18px rgba(var(--shade), .45),
+        inset 0 3px 5px rgba(255, 255, 255, .45),
+        inset 0 -6px 8px rgba(70, 50, 190, .35);
     }
-    .add-btn:hover { background: var(--primary-dark); }
-    .add-btn:disabled { opacity: .5; cursor: default; }
+    .add-btn:hover { filter: brightness(1.05); }
+    .add-btn:active {
+      box-shadow:
+        0 3px 6px rgba(var(--shade), .4),
+        inset 0 4px 8px rgba(70, 50, 190, .4);
+    }
+    .add-btn:disabled { opacity: .6; cursor: default; transform: none; }
 
     #error {
       display: none;
       background: var(--danger-soft);
-      color: var(--danger);
-      padding: 11px 16px;
-      border-radius: 12px;
-      font-size: .9rem;
-      margin-bottom: 20px;
+      color: #d95c77;
+      padding: 12px 18px;
+      border-radius: 20px;
+      font-size: .92rem;
+      margin-bottom: 18px;
+      box-shadow:
+        0 8px 16px rgba(238, 127, 150, .22),
+        inset 0 3px 4px rgba(255, 255, 255, .9),
+        inset 0 -4px 6px rgba(238, 127, 150, .15);
     }
 
-    /* 목록: 구분선으로 나뉜 한 장의 카드 */
-    ul {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      background: var(--card);
-      border-radius: 14px;
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-    ul:empty { display: none; }
+    ul { list-style: none; padding: 0; margin: 0; }
 
+    /* 항목 하나하나가 폭신한 카드 */
     li {
       display: flex;
       align-items: flex-start;
-      gap: 12px;
-      padding: 13px 16px 13px 8px;
-      background: var(--card);
-      border-bottom: 1px solid var(--line);
+      gap: 10px;
+      padding: 16px 16px 16px 10px;
+      margin-bottom: 14px;
+      background: var(--clay);
+      border-radius: 24px;
+      box-shadow: var(--puffy);
+      transition: transform .3s var(--bounce), box-shadow .2s, opacity .2s;
     }
-    li:last-child { border-bottom: none; }
+    li:last-child { margin-bottom: 0; }
+    li:hover { transform: translateY(-3px); }
+    li.dragging { opacity: .45; transform: scale(.97) rotate(-1deg); }
 
-    /* 동그란 체크박스 */
     li input[type="checkbox"] {
       appearance: none;
       -webkit-appearance: none;
-      width: 22px;
-      height: 22px;
+      width: 26px;
+      height: 26px;
       margin: 0;
-      border: 1.5px solid var(--ring);
-      border-radius: 50%;
-      background: transparent;
+      border-radius: 10px;
+      background: var(--primary-soft);
+      box-shadow: var(--pressed);
       cursor: pointer;
       flex-shrink: 0;
-      transition: background .15s, border-color .15s;
+      transition: transform .3s var(--bounce), background .2s;
     }
-    li input[type="checkbox"]:hover { border-color: var(--primary); }
+    li input[type="checkbox"]:hover { transform: scale(1.12); }
+    li input[type="checkbox"]:active { transform: scale(.85); }
     li input[type="checkbox"]:checked {
-      border-color: var(--primary);
-      background: var(--primary)
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M6 11.5l3.3 3.3L16 8' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-        center / 100% no-repeat;
+      background:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 26'%3E%3Cpath d='M7 13.5l4 4 8-9' fill='none' stroke='%23fff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% no-repeat,
+        linear-gradient(160deg, var(--primary-light), var(--primary-dark));
+      box-shadow:
+        0 5px 10px rgba(var(--shade), .4),
+        inset 0 2px 3px rgba(255, 255, 255, .5),
+        inset 0 -3px 5px rgba(70, 50, 190, .35);
     }
-    li input[type="checkbox"]:focus-visible { outline: 3px solid var(--primary-soft); outline-offset: 1px; }
+    li input[type="checkbox"]:focus-visible { outline: 3px solid var(--primary-light); outline-offset: 2px; }
 
     .drag-handle {
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 26px;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      border-radius: 6px;
-      color: var(--ring);
-      font-size: 1rem;
+      border-radius: 9px;
+      color: var(--primary-light);
+      font-size: 1.05rem;
       line-height: 1;
       cursor: grab;
       user-select: none;
-      transition: color .15s, background .15s;
+      transition: transform .3s var(--bounce), color .2s, background .2s;
     }
-    li:hover .drag-handle { color: var(--muted); }
     .drag-handle:hover, .drag-handle:focus-visible {
       background: var(--primary-soft);
-      color: var(--primary);
+      color: var(--primary-dark);
+      transform: scale(1.15);
       outline: none;
     }
     .drag-handle:active { cursor: grabbing; }
-    li.dragging { opacity: .35; }
 
     .content {
       flex: 1;
       min-width: 0;
+      padding-top: 1px;
     }
     .title {
-      font-size: 1rem;
+      font-family: var(--display-font);
+      font-size: 1.1rem;
       word-break: break-all;
     }
     .title.done {
       text-decoration: line-through;
+      text-decoration-thickness: 2px;
       color: var(--muted);
+      opacity: .75;
     }
     .desc {
-      font-size: .87rem;
+      font-size: .9rem;
       color: var(--muted);
       margin-top: 2px;
       white-space: pre-wrap;
@@ -229,41 +303,67 @@
     }
 
     .due {
+      display: inline-block;
       font-size: .8rem;
-      color: var(--muted);
-      margin-top: 3px;
+      color: var(--primary-dark);
+      background: var(--primary-soft);
+      padding: 2px 10px;
+      border-radius: 999px;
+      margin-top: 7px;
     }
     .due.overdue {
-      color: var(--danger);
-      font-weight: 600;
+      color: #d95c77;
+      background: var(--danger-soft);
+      font-weight: 700;
     }
 
-    /* 수정 모드 입력칸 */
     li .title-edit {
-      padding: 8px 12px;
-      border-radius: 10px;
-      background: var(--bg);
-      box-shadow: inset 0 0 0 1px var(--line);
+      padding: 9px 14px;
+      border-radius: 14px;
     }
-    li .title-edit:focus { box-shadow: inset 0 0 0 1px var(--primary), 0 0 0 4px var(--primary-soft); }
 
     .icon-btn, .del-btn {
-      padding: 5px 12px;
-      font-size: .87rem;
-      font-weight: 500;
-      background: transparent;
+      padding: 7px 14px;
+      font-size: .9rem;
       flex-shrink: 0;
     }
-    .icon-btn { color: var(--primary); }
-    .icon-btn:hover { background: var(--primary-soft); }
-    .del-btn { color: var(--danger); }
-    .del-btn:hover { background: var(--danger-soft); }
+    .icon-btn {
+      color: var(--primary-dark);
+      background: var(--primary-soft);
+      box-shadow:
+        0 5px 10px rgba(var(--shade), .22),
+        inset 0 2px 3px rgba(255, 255, 255, .95),
+        inset 0 -3px 5px rgba(var(--shade), .16);
+    }
+    .del-btn {
+      color: #d95c77;
+      background: var(--danger-soft);
+      box-shadow:
+        0 5px 10px rgba(238, 127, 150, .25),
+        inset 0 2px 3px rgba(255, 255, 255, .95),
+        inset 0 -3px 5px rgba(238, 127, 150, .2);
+    }
 
     .empty {
       text-align: center;
       color: var(--muted);
-      padding: 40px 0;
-      font-size: .95rem;
+      padding: 36px 0 20px;
+      font-size: 1rem;
+    }
+
+    /* 좁은 화면에서는 한 줄로 쌓고, 입력 영역을 목록 위에 둔다 */
+    @media (max-width: 720px) {
+      .columns { grid-template-columns: minmax(0, 1fr); }
+      .input-box { position: static; order: -1; }
+      .app { padding: 58px 16px 22px; }
+      /* 내용이 한 줄을 다 쓰도록 수정·삭제 버튼은 아랫줄 오른쪽으로 내린다 */
+      li { flex-wrap: wrap; }
+      .content { flex-basis: calc(100% - 80px); }
+      .icon-btn { margin-left: auto; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
     }
   </style>
 </head>
@@ -272,16 +372,19 @@
     <h1>To-Do</h1>
     <div class="count" id="count"></div>
 
-    <div class="input-box">
-      <input type="text" id="new-title" placeholder="제목" />
-      <textarea id="new-desc" placeholder="설명 (선택)" rows="2"></textarea>
-      <input type="date" id="new-due" title="마감일 (선택)" />
-      <button class="add-btn" id="add-btn">추가</button>
-    </div>
-
     <div id="error"></div>
 
-    <ul id="list"></ul>
+    <!-- 왼쪽: 할 일 목록 / 오른쪽: 새 할 일 입력 -->
+    <div class="columns">
+      <ul id="list"></ul>
+
+      <div class="input-box">
+        <input type="text" id="new-title" placeholder="제목" maxlength="200" />
+        <textarea id="new-desc" placeholder="설명 (선택)" rows="3" maxlength="2000"></textarea>
+        <input type="date" id="new-due" title="마감일 (선택)" />
+        <button class="add-btn" id="add-btn">추가</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
@@ -292,7 +395,7 @@
     function fireConfetti() {
       const duration = 1500;
       const end = Date.now() + duration;
-      const colors = ["#0071e3", "#34c759", "#ff9f0a", "#ff375f", "#af52de", "#5ac8fa"];
+      const colors = ["#8f80f0", "#b3a8f8", "#ebe8fd", "#ffd6a5", "#ffb3c7", "#b8f2e6"];
 
       (function frame() {
         confetti({
@@ -341,6 +444,16 @@
       return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     }
 
+    // 마감일까지 남은 날짜를 D-3(3일 남음), D-0(오늘), D+2(2일 지남) 형태로 반환
+    function ddayLabel(dueISO) {
+      const toLocalDate = (iso) => {
+        const [y, m, d] = iso.split("-").map(Number);
+        return new Date(y, m - 1, d);
+      };
+      const days = Math.round((toLocalDate(dueISO) - toLocalDate(todayISO())) / 86400000);
+      return days >= 0 ? `D-${days}` : `D+${-days}`;
+    }
+
     // 서버에서 받아온(order 순 정렬된) 최신 목록
     let currentTodos = [];
 
@@ -367,7 +480,7 @@
 
       listEl.innerHTML = "";
       if (todos.length === 0) {
-        listEl.innerHTML = '<div class="empty">할 일이 없습니다. 위에서 추가해 보세요.</div>';
+        listEl.innerHTML = '<div class="empty">할 일이 없습니다. 새 할 일을 추가해 보세요.</div>';
         return;
       }
       for (let i = 0; i < todos.length; i++) {
@@ -484,7 +597,8 @@
         const due = document.createElement("div");
         const overdue = !todo.done && todo.due_date < todayISO();
         due.className = "due" + (overdue ? " overdue" : "");
-        due.textContent = `마감: ${todo.due_date}${overdue ? " (기한 초과)" : ""}`;
+        due.textContent = ddayLabel(todo.due_date);
+        due.title = `마감: ${todo.due_date}${overdue ? " (기한 초과)" : ""}`;
         content.appendChild(due);
       }
 
@@ -512,12 +626,14 @@
       const titleInput = document.createElement("input");
       titleInput.type = "text";
       titleInput.className = "title-edit";
+      titleInput.maxLength = 200;
       titleInput.value = todo.title;
 
       const descInput = document.createElement("textarea");
       descInput.className = "title-edit";
       descInput.rows = 2;
       descInput.placeholder = "설명 (선택)";
+      descInput.maxLength = 2000;
       descInput.value = todo.description || "";
       descInput.style.marginTop = "6px";
 
@@ -577,6 +693,8 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title, description, done: false, due_date: dueEl.value || null }),
         });
+        // 항목 수 상한에 걸리면 서버가 보낸 안내 문구를 그대로 보여 준다
+        if (res.status === 409) throw new Error((await res.json()).detail);
         if (!res.ok) throw new Error(`추가에 실패했습니다 (${res.status})`);
         inputEl.value = "";
         descEl.value = "";

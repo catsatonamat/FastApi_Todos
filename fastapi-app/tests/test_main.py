@@ -208,6 +208,71 @@ def test_move_invalid_direction():
     assert response.status_code == 422
 
 
+# ---------- 입력 제한 (길이, 범위, 항목 수) ----------
+
+def test_create_todo_rejects_empty_title():
+    assert client.post("/todos", json={"title": ""}).status_code == 422
+
+
+def test_create_todo_rejects_blank_title():
+    assert client.post("/todos", json={"title": "   "}).status_code == 422
+
+
+def test_create_todo_strips_title_whitespace():
+    response = client.post("/todos", json={"title": "  장보기  "})
+    assert response.status_code == 201
+    assert response.json()["title"] == "장보기"
+
+
+def test_create_todo_title_length_limit():
+    assert client.post("/todos", json={"title": "가" * main.MAX_TITLE_LENGTH}).status_code == 201
+    assert client.post("/todos", json={"title": "가" * (main.MAX_TITLE_LENGTH + 1)}).status_code == 422
+
+
+def test_create_todo_description_length_limit():
+    ok = client.post("/todos", json={"title": "T", "description": "a" * main.MAX_DESCRIPTION_LENGTH})
+    too_long = client.post("/todos", json={"title": "T", "description": "a" * (main.MAX_DESCRIPTION_LENGTH + 1)})
+    assert ok.status_code == 201
+    assert too_long.status_code == 422
+
+
+def test_update_todo_applies_length_limits():
+    save_todos([make_todo(1, "Test")])
+    assert client.put("/todos/1", json={"title": "가" * (main.MAX_TITLE_LENGTH + 1)}).status_code == 422
+    assert client.put("/todos/1", json={"title": "T", "description": "a" * (main.MAX_DESCRIPTION_LENGTH + 1)}).status_code == 422
+    assert load_todos()[0]["title"] == "Test"
+
+
+def test_update_todo_order_range():
+    save_todos([make_todo(1, "Test")])
+    assert client.put("/todos/1", json={"title": "T", "order": -1}).status_code == 422
+    assert client.put("/todos/1", json={"title": "T", "order": main.MAX_ORDER + 1}).status_code == 422
+    assert client.put("/todos/1", json={"title": "T", "order": main.MAX_ORDER}).status_code == 200
+
+
+def test_create_todo_rejected_when_item_limit_reached(monkeypatch):
+    monkeypatch.setattr(main, "MAX_TODOS", 2)
+    seed("A", "B")
+    response = client.post("/todos", json={"title": "C"})
+    assert response.status_code == 409
+    assert "최대 2개" in response.json()["detail"]
+    assert sorted_titles() == ["A", "B"]
+
+
+def test_create_todo_allowed_again_after_delete_at_limit(monkeypatch):
+    monkeypatch.setattr(main, "MAX_TODOS", 2)
+    seed("A", "B")
+    client.delete("/todos/1")
+    assert client.post("/todos", json={"title": "C"}).status_code == 201
+
+
+def test_items_saved_before_limits_are_still_readable():
+    save_todos([make_todo(1, "", "a" * (main.MAX_DESCRIPTION_LENGTH + 1), order=-5)])
+    response = client.get("/todos")
+    assert response.status_code == 200
+    assert response.json()[0]["order"] == -5
+
+
 # ---------- 우선순위 이동 (/todos/{id}/move) ----------
 
 def test_move_up_swaps_with_previous():
