@@ -8,8 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # root가 아닌 실행 전용 사용자 생성
+# 앱 코드가 있는 /app은 root 소유로 두고, 데이터를 쓰는 /app/data만 appuser 소유로 만든다
 RUN useradd --create-home --uid 10001 appuser \
- && mkdir /app && chown appuser:appuser /app
+ && mkdir -p /app/data && chown appuser:appuser /app/data
 
 # 작업 디렉토리 설정
 WORKDIR /app
@@ -19,9 +20,12 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # 실행에 필요한 파일만 명시해서 복사 (테스트·보고서·설정 파일이 이미지에 섞여 들어가지 않도록 `COPY . .` 대신 사용)
-# 앱이 todo.json을 수정할 수 있도록 소유자를 appuser로 지정
-COPY --chown=appuser:appuser main.py todo.json ./
-COPY --chown=appuser:appuser templates/ ./templates/
+# --chown 없이 root 소유로 복사해서, 앱이 침해돼도 appuser가 코드를 바꿀 수 없게 한다 (읽기·실행만 가능)
+COPY main.py ./
+COPY templates/ ./templates/
+
+# 할 일 데이터는 appuser가 쓸 수 있는 /app/data에 저장 (파일이 없으면 앱이 시작할 때 빈 목록으로 만든다)
+ENV TODO_DATA_FILE=/app/data/todo.json
 
 # 이후 명령은 appuser 권한으로 실행
 USER appuser

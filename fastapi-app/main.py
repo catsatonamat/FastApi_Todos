@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
@@ -10,7 +11,8 @@ from pydantic import BaseModel, Field, StringConstraints
 app = FastAPI(title="To-Do API")
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_FILE = BASE_DIR / "todo.json"
+# 저장 위치는 TODO_DATA_FILE 환경변수로 바꿀 수 있다 (컨테이너에서는 쓰기 전용 디렉터리를 가리킨다)
+DATA_FILE = Path(os.environ.get("TODO_DATA_FILE", BASE_DIR / "todo.json"))
 TEMPLATES_DIR = BASE_DIR / "templates"
 
 # 입력 제한 (디스크·메모리 소진 방지)
