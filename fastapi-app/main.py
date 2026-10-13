@@ -102,7 +102,12 @@ def read_todos():
     return sorted(load_todos(), key=lambda t: t.get("order", 0))
 
 
-@app.post("/todos", response_model=TodoItem, status_code=201)
+@app.post(
+    "/todos",
+    response_model=TodoItem,
+    status_code=201,
+    responses={409: {"description": "항목 수가 상한(MAX_TODOS)에 도달해 더 추가할 수 없음"}},
+)
 def create_todo(todo: TodoIn):
     """새 To-Do 항목 추가 (Create). 서버가 id와 순서(order)를 부여한다."""
     todos = load_todos()
@@ -155,8 +160,12 @@ def move_todo(todo_id: int, direction: Literal["up", "down"]):
     return todos
 
 
-@app.put("/todos/{todo_id}/reorder", response_model=list[TodoItem])
-def reorder_todo(todo_id: int, position: int = Query(ge=0)):
+@app.put(
+    "/todos/{todo_id}/reorder",
+    response_model=list[TodoItem],
+    responses={404: {"description": "해당 id의 항목이 없음"}},
+)
+def reorder_todo(todo_id: int, position: Annotated[int, Query(ge=0)]):
     """항목을 목록의 position번째(0부터) 자리로 옮기고 order를 0부터 다시 매긴다.
     position이 목록 길이를 넘으면 맨 끝으로 옮긴다."""
     todos = sorted(load_todos(), key=lambda t: t.get("order", 0))
