@@ -1,10 +1,10 @@
 [
   {
-    "title": "저녁 먹기",
-    "description": "덮밥",
-    "done": true,
+    "title": "도커 실습하기",
+    "description": "jenkins로 도커 배포 실습",
+    "done": false,
     "order": 0,
-    "id": 3
+    "id": 2
   },
   {
     "title": "도커 공부하기",
@@ -14,10 +14,10 @@
     "id": 1
   },
   {
-    "title": "도커 실습하기",
-    "description": "jenkins로 도커 배포 실습",
-    "done": false,
+    "title": "저녁 먹기",
+    "description": "덮밥",
+    "done": true,
     "order": 2,
-    "id": 2
+    "id": 3
   }
 ]

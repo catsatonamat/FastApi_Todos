@@ -146,37 +146,73 @@ def test_edit_empty_title_shows_error(page: Page):
 
 # ---------- 우선순위 ----------
 
-def test_move_down_reorders_list(page: Page):
+def handle(page: Page, title: str):
+    return row(page, title).locator(".drag-handle")
+
+
+def titles(page: Page):
+    return page.locator("#list li .title")
+
+
+def drag_below(page: Page, title: str, target_title: str):
+    """title 행을 target_title 행의 아래쪽 절반에 놓는다 (= 그 행 바로 뒤로 이동)."""
+    box = row(page, target_title).bounding_box()
+    handle(page, title).drag_to(
+        row(page, target_title), target_position={"x": 40, "y": box["height"] - 4}
+    )
+
+
+def drag_above(page: Page, title: str, target_title: str):
+    """title 행을 target_title 행의 위쪽 절반에 놓는다 (= 그 행 바로 앞으로 이동)."""
+    handle(page, title).drag_to(row(page, target_title), target_position={"x": 40, "y": 4})
+
+
+def test_drag_down_reorders_list(page: Page):
     add_todo(page, "첫번째")
     add_todo(page, "두번째")
-    row(page, "첫번째").locator("button[title='우선순위 내리기']").click()
-    expect(page.locator("#list li .title").nth(0)).to_have_text("두번째")
-    expect(page.locator("#list li .title").nth(1)).to_have_text("첫번째")
+    drag_below(page, "첫번째", "두번째")
+    expect(titles(page)).to_have_text(["두번째", "첫번째"])
     snap(page, "07_after_move_down")
 
 
-def test_move_up_reorders_list(page: Page):
+def test_drag_up_reorders_list(page: Page):
     add_todo(page, "가")
     add_todo(page, "나")
-    row(page, "나").locator("button[title='우선순위 올리기']").click()
-    expect(page.locator("#list li .title").nth(0)).to_have_text("나")
+    drag_above(page, "나", "가")
+    expect(titles(page)).to_have_text(["나", "가"])
 
 
-def test_move_buttons_disabled_at_edges(page: Page):
+def test_drag_across_multiple_rows(page: Page):
+    for title in ("A", "B", "C", "D"):
+        add_todo(page, title)
+    drag_below(page, "A", "D")
+    expect(titles(page)).to_have_text(["B", "C", "D", "A"])
+
+
+def test_order_buttons_are_removed(page: Page):
+    add_todo(page, "A")
+    expect(page.locator(".order-btn")).to_have_count(0)
+    expect(handle(page, "A")).to_be_visible()
+
+
+def test_arrow_keys_on_handle_reorder_list(page: Page):
     add_todo(page, "A")
     add_todo(page, "B")
-    expect(row(page, "A").locator("button[title='우선순위 올리기']")).to_be_disabled()
-    expect(row(page, "B").locator("button[title='우선순위 내리기']")).to_be_disabled()
+    handle(page, "A").focus()
+    page.keyboard.press("ArrowDown")
+    expect(titles(page)).to_have_text(["B", "A"])
+    page.keyboard.press("ArrowUp")
+    expect(titles(page)).to_have_text(["A", "B"])
 
 
-def test_move_persists_after_reload(page: Page):
+def test_drag_persists_after_reload(page: Page):
     add_todo(page, "X")
     add_todo(page, "Y")
-    row(page, "X").locator("button[title='우선순위 내리기']").click()
-    expect(page.locator("#list li .title").nth(0)).to_have_text("Y")
+    drag_below(page, "X", "Y")
+    expect(titles(page)).to_have_text(["Y", "X"])
     page.reload()
     page.wait_for_load_state("networkidle")
-    expect(page.locator("#list li .title").nth(0)).to_have_text("Y")
+    expect(titles(page)).to_have_text(["Y", "X"])
 
 
 # ---------- 삭제 / 상태 유지 ----------

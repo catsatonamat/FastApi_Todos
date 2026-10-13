@@ -3,7 +3,7 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -130,6 +130,24 @@ def move_todo(todo_id: int, direction: Literal["up", "down"]):
         )
         todos.sort(key=lambda t: t.get("order", 0))
         save_todos(todos)
+
+    return todos
+
+
+@app.put("/todos/{todo_id}/reorder", response_model=list[TodoItem])
+def reorder_todo(todo_id: int, position: int = Query(ge=0)):
+    """항목을 목록의 position번째(0부터) 자리로 옮기고 order를 0부터 다시 매긴다.
+    position이 목록 길이를 넘으면 맨 끝으로 옮긴다."""
+    todos = sorted(load_todos(), key=lambda t: t.get("order", 0))
+    idx = next((i for i, t in enumerate(todos) if t["id"] == todo_id), None)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
+
+    item = todos.pop(idx)
+    todos.insert(min(position, len(todos)), item)
+    for i, t in enumerate(todos):
+        t["order"] = i
+    save_todos(todos)
 
     return todos
 

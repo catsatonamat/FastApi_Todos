@@ -270,6 +270,72 @@ def test_repeated_moves_keep_orders_unique():
     assert sorted(orders) == [0, 1, 2, 3]
 
 
+# ---------- 드래그 순서 변경 (/todos/{id}/reorder) ----------
+
+def test_reorder_moves_item_down_to_position():
+    seed("A", "B", "C", "D")
+    response = client.put("/todos/1/reorder", params={"position": 2})
+    assert response.status_code == 200
+    assert [t["title"] for t in response.json()] == ["B", "C", "A", "D"]
+    assert sorted_titles() == ["B", "C", "A", "D"]
+
+
+def test_reorder_moves_item_up_to_position():
+    seed("A", "B", "C", "D")
+    response = client.put("/todos/4/reorder", params={"position": 0})
+    assert response.status_code == 200
+    assert sorted_titles() == ["D", "A", "B", "C"]
+
+
+def test_reorder_same_position_is_noop():
+    seed("A", "B", "C")
+    response = client.put("/todos/2/reorder", params={"position": 1})
+    assert response.status_code == 200
+    assert sorted_titles() == ["A", "B", "C"]
+
+
+def test_reorder_position_past_end_moves_to_last():
+    seed("A", "B", "C")
+    response = client.put("/todos/1/reorder", params={"position": 99})
+    assert response.status_code == 200
+    assert sorted_titles() == ["B", "C", "A"]
+
+
+def test_reorder_renumbers_orders_from_zero():
+    save_todos([make_todo(1, "A", order=5), make_todo(2, "B", order=5), make_todo(3, "C", order=-2)])
+    client.put("/todos/1/reorder", params={"position": 0})
+    saved = json.loads(main.DATA_FILE.read_text(encoding="utf-8"))
+    assert {t["id"]: t["order"] for t in saved} == {1: 0, 3: 1, 2: 2}
+
+
+def test_reorder_keeps_item_fields_intact():
+    save_todos([
+        {**make_todo(1, "A", "desc-a", done=True, order=0), "due_date": "2027-02-02"},
+        make_todo(2, "B", "desc-b", order=1),
+    ])
+    client.put("/todos/1/reorder", params={"position": 1})
+    moved = next(t for t in load_todos() if t["id"] == 1)
+    assert moved == {"id": 1, "title": "A", "description": "desc-a", "done": True, "order": 1, "due_date": "2027-02-02"}
+
+
+def test_reorder_not_found():
+    seed("A")
+    response = client.put("/todos/99/reorder", params={"position": 0})
+    assert response.status_code == 404
+
+
+def test_reorder_negative_position_returns_422():
+    seed("A", "B")
+    response = client.put("/todos/1/reorder", params={"position": -1})
+    assert response.status_code == 422
+
+
+def test_reorder_missing_position_returns_422():
+    seed("A", "B")
+    response = client.put("/todos/1/reorder")
+    assert response.status_code == 422
+
+
 # ---------- 마감일 (due_date) ----------
 
 def test_todo_in_due_date_defaults_to_none():
