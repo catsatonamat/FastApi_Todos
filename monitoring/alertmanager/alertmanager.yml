@@ -1,0 +1,12 @@
+route:
+  receiver: ops-agent
+  group_by: ["alertname", "service"]
+  group_wait: 5s        # 데모용: 첫 알림을 빨리 보낸다
+  group_interval: 1m
+  repeat_interval: 5m   # 에이전트가 재시작돼도 5분 안에 진행 중인 알림을 다시 받는다
+
+receivers:
+  - name: ops-agent
+    webhook_configs:
+      - url: http://ops-agent:8080/webhook/alertmanager
+        send_resolved: true   # 복구(resolved) 알림도 보내 MTTR을 계산한다

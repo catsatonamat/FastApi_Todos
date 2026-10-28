@@ -21,7 +21,7 @@ RUN pip install -r requirements.txt
 
 # 실행에 필요한 파일만 명시해서 복사 (테스트·보고서·설정 파일이 이미지에 섞여 들어가지 않도록 `COPY . .` 대신 사용)
 # --chown 없이 root 소유로 복사해서, 앱이 침해돼도 appuser가 코드를 바꿀 수 없게 한다 (읽기·실행만 가능)
-COPY main.py ./
+COPY main.py chaos.py observability.py ./
 COPY templates/ ./templates/
 
 # 할 일 데이터는 appuser가 쓸 수 있는 /app/data에 저장 (파일이 없으면 앱이 시작할 때 빈 목록으로 만든다)
@@ -32,5 +32,5 @@ USER appuser
 
 EXPOSE 8000
 
-# FastAPI 서버 실행
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# FastAPI 서버 실행 (접근 로그는 앱이 JSON으로 직접 남기므로 uvicorn 기본 접근 로그는 끈다)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

@@ -1,0 +1,36 @@
+groups:
+  - name: todo-api
+    rules:
+      - alert: TodoHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="todo-app", status=~"5.."}[1m]))
+            / sum(rate(http_requests_total{job="todo-app"}[1m])) > 0.1
+        for: 30s
+        labels:
+          severity: critical
+          service: todo-api
+        annotations:
+          summary: "Todo API 5xx 에러율 {{ $value | humanizePercentage }}"
+          description: "최근 1분간 5xx 응답 비율이 10%를 넘었습니다."
+
+      - alert: TodoHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="todo-app"}[1m]))) > 0.5
+        for: 30s
+        labels:
+          severity: warning
+          service: todo-api
+        annotations:
+          summary: "Todo API p95 지연 {{ $value | humanizeDuration }}"
+          description: "최근 1분간 p95 응답 시간이 500ms를 넘었습니다."
+
+      - alert: TodoAppDown
+        expr: up{job="todo-app"} == 0
+        for: 15s
+        labels:
+          severity: critical
+          service: todo-api
+        annotations:
+          summary: "Todo API 응답 없음"
+          description: "Prometheus가 todo-app의 /metrics를 수집하지 못하고 있습니다."

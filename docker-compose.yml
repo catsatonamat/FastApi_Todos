@@ -6,15 +6,146 @@ services:
     container_name: FastApi-app
     ports:
       - "5001:8000"
+    environment:
+      - CHAOS_ADMIN_TOKEN=${CHAOS_ADMIN_TOKEN:-}   # 비우면 장애 주입 API(/admin/chaos)가 꺼진다
+    labels:
+      aiops.logs: "true"          # Alloy가 이 라벨이 붙은 컨테이너 로그만 Loki로 보낸다
     restart: unless-stopped       # 서버 재부팅·오류 시 자동 재시작
     security_opt:
       - no-new-privileges:true    # 컨테이너 안에서 권한 상승 차단
     cap_drop:
       - ALL                       # 불필요한 커널 권한 모두 제거
 
+  # ---------- AIOps: 관측 스택 ----------
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+
+  loki:
+    image: grafana/loki:3.7.9
+    container_name: loki
+    command: -config.file=/etc/loki/loki.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+
+  alloy:
+    image: grafana/alloy:v1.21.2
+    container_name: alloy
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    ports:
+      - "12345:12345"
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+    depends_on:
+      - loki
+      - docker-proxy
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=true          # 녹화 편의를 위해 로그인 없이 대시보드 조회
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/todo-aiops.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+
+  # Docker API 프록시 (docker.sock 전체 권한을 컨테이너에 넘기지 않기 위함)
+  # 로그 수집용(Alloy): 읽기 전용
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: docker-proxy
+    environment:
+      - CONTAINERS=1        # GET /containers/* (목록·로그) 허용
+      - NETWORKS=1          # GET /networks/* (Alloy 컨테이너 탐색에 필요)
+      - POST=0              # GET 이외 요청은 모두 차단
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # 조치용(ops-agent): 컨테이너 restart/stop/kill만 허용 (생성·삭제·exec·이미지 등은 차단)
+  docker-proxy-ops:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: docker-proxy-ops
+    environment:
+      - POST=1              # GET 이외 메서드를 허용하되, 아래에서 켠 엔드포인트만 통과
+      - ALLOW_RESTARTS=1    # POST /containers/{id}/(restart|stop|kill)
+      - CONTAINERS=0        # 그 밖의 /containers/* (create, delete 등) 차단
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  loadgen:
+    image: python:3.13-slim
+    container_name: loadgen
+    command: python /loadgen/loadgen.py
+    environment:
+      - TARGET_URL=http://fastapi-app:8000
+      - RPS=${LOADGEN_RPS:-5}
+    volumes:
+      - ./loadgen:/loadgen:ro
+    depends_on:
+      - fastapi-app
+
+  # ---------- AIOps: 운영 에이전트 + Discord 봇 ----------
+  ops-agent:
+    build: ./ops-agent
+    container_name: ops-agent
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - LOKI_URL=http://loki:3100
+      - APP_URL=http://fastapi-app:8000
+      - DOCKER_PROXY_URL=http://docker-proxy-ops:2375
+      - APP_CONTAINER=FastApi-app
+      - AUDIT_LOG=/data/audit.jsonl
+      - INCIDENT_LOG=/data/incidents.jsonl
+    ports:
+      - "127.0.0.1:8081:8080"   # 디버깅용 (Discord 없이 콘솔 모드로 조치 API 호출)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 호스트에서 실행 중인 Ollama 접근
+    labels:
+      aiops.logs: "true"
+    volumes:
+      - agent_data:/data
+    depends_on:
+      - prometheus
+      - loki
+      - docker-proxy-ops
+    restart: unless-stopped
+
+  # ---------- 코드 품질 (필요할 때만: docker compose --profile sonar up -d sonarqube) ----------
   sonarqube:
     image: sonarqube:26.9.0.129388-community
     container_name: sonarqube
+    profiles: ["sonar"]
     read_only: true                             # 컨테이너 파일시스템 읽기 전용 (아래 볼륨과 /tmp만 쓰기 가능)
     ports:
       - "9000:9000"
@@ -33,3 +164,7 @@ volumes:                                        # ← 최상위(0칸)로 이동
   sonarqube_extensions:
   sonarqube_logs:
   sonarqube_temp:
+  prometheus_data:
+  loki_data:
+  grafana_data:
+  agent_data:

@@ -1,0 +1,48 @@
+// 컨테이너 로그 수집: Docker API(socket-proxy 경유) → JSON 파싱 → Loki
+// 라벨 aiops.logs=true 가 붙은 컨테이너만 수집한다.
+
+discovery.docker "containers" {
+  host = "tcp://docker-proxy:2375"
+  filter {
+    name   = "label"
+    values = ["aiops.logs=true"]
+  }
+}
+
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "tcp://docker-proxy:2375"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.json.receiver]
+}
+
+// 앱이 남기는 JSON 로그에서 level을 라벨로 승격한다 (카디널리티가 낮은 필드만 라벨로)
+loki.process "json" {
+  stage.json {
+    expressions = { level = "level" }
+  }
+  stage.labels {
+    values = { level = "" }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

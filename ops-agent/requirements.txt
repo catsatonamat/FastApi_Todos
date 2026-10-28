@@ -1,0 +1,5 @@
+discord.py>=2.7.1   # Discord 봇 (aiohttp 포함 — 웹훅 서버·HTTP 클라이언트로도 사용)
+aiohttp>=3.14.5
+pydantic>=2.12
+tzdata>=2025.2   # 슬림 이미지에 시간대 DB가 없어 KST 표시에 필요
+prometheus-client>=0.26.0 # 에이전트 KPI(MTTD·MTTR·적중률)를 Grafana에 노출

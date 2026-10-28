@@ -1,19 +1,26 @@
 import json
 import os
+import secrets
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, StringConstraints
 
+import chaos
+from observability import STORAGE_ERRORS, instrument, log
+
 app = FastAPI(title="To-Do API")
+instrument(app)
 
 BASE_DIR = Path(__file__).resolve().parent
 # 저장 위치는 TODO_DATA_FILE 환경변수로 바꿀 수 있다 (컨테이너에서는 쓰기 전용 디렉터리를 가리킨다)
 DATA_FILE = Path(os.environ.get("TODO_DATA_FILE", BASE_DIR / "todo.json"))
 TEMPLATES_DIR = BASE_DIR / "templates"
+# 장애 주입 API(/admin/chaos) 인증 토큰. 설정하지 않으면 해당 API는 비활성화(404)된다
+CHAOS_ADMIN_TOKEN = os.environ.get("CHAOS_ADMIN_TOKEN", "")
 
 # 입력 제한 (디스크·메모리 소진 방지)
 MAX_TITLE_LENGTH = 200
@@ -50,6 +57,7 @@ class TodoItem(BaseModel):
 # ---------- JSON 파일 읽기/쓰기 헬퍼 ----------
 def load_todos() -> list[dict]:
     """todo.json을 읽어 리스트로 반환. 없으면 빈 배열로 생성한다."""
+    chaos.before_storage("reading", str(DATA_FILE))
     if not DATA_FILE.exists():
         DATA_FILE.write_text("[]", encoding="utf-8")
         return []
@@ -72,6 +80,7 @@ def load_todos() -> list[dict]:
 
 
 def save_todos(todos: list[dict]) -> None:
+    chaos.before_storage("writing", str(DATA_FILE))
     DATA_FILE.write_text(
         json.dumps(todos, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -89,6 +98,18 @@ def next_order(todos: list[dict]) -> int:
 
 # 서버 시작 시 todo.json이 없으면 빈 배열로 생성
 load_todos()
+
+
+# ---------- 예외 처리 ----------
+@app.exception_handler(chaos.StorageUnavailableError)
+def storage_unavailable(request: Request, exc: chaos.StorageUnavailableError):
+    """저장소 장애는 503으로 응답하고, 원인 분석에 쓰일 수 있도록 에러 로그를 남긴다."""
+    STORAGE_ERRORS.labels(exc.op).inc()
+    log.error(
+        f"StorageUnavailableError: {exc}",
+        extra={"error_type": "StorageUnavailableError", "path": request.url.path, "storage_op": exc.op},
+    )
+    return JSONResponse({"detail": "저장소에 일시적으로 접근할 수 없습니다."}, status_code=503)
 
 
 # ---------- 엔드포인트 ----------
@@ -193,3 +214,38 @@ def delete_todo(todo_id: int):
         raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
     save_todos(new_todos)
     return None
+
+
+# ---------- 운영(헬스체크·장애 주입) ----------
+@app.get("/health", responses={503: {"description": "저장소에 접근할 수 없음"}})
+def health():
+    """헬스체크. 저장소를 실제로 읽어 보고 실패하면 503을 반환한다."""
+    load_todos()
+    return {"status": "ok"}
+
+
+def require_admin(token: str | None) -> None:
+    if not CHAOS_ADMIN_TOKEN:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not token or not secrets.compare_digest(token, CHAOS_ADMIN_TOKEN):
+        raise HTTPException(status_code=401, detail="관리자 토큰이 올바르지 않습니다.")
+
+
+AdminToken = Annotated[str | None, Header(alias="X-Admin-Token")]
+ADMIN_RESPONSES = {401: {"description": "관리자 토큰 불일치"}, 404: {"description": "장애 주입 API 비활성화"}}
+
+
+@app.get("/admin/chaos", responses=ADMIN_RESPONSES)
+def get_chaos(x_admin_token: AdminToken = None):
+    """현재 장애 주입 설정 조회."""
+    require_admin(x_admin_token)
+    return chaos.state.to_dict()
+
+
+@app.put("/admin/chaos", responses=ADMIN_RESPONSES)
+def set_chaos(config: chaos.ChaosConfig, x_admin_token: AdminToken = None):
+    """장애 주입 설정 변경 (AIOps 데모용). mode=off 이면 해제."""
+    require_admin(x_admin_token)
+    state = chaos.configure(config)
+    log.warning("fault injection config changed", extra={"chaos": state.to_dict()})
+    return state.to_dict()
