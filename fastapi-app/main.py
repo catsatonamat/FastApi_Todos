@@ -6,9 +6,13 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+from prometheus_fastapi_instrumentator import Instrumentator  # ← 추가
 from pydantic import BaseModel, Field, StringConstraints
 
 app = FastAPI(title="To-Do API")
+
+# ← 추가: Prometheus 메트릭 엔드포인트(/metrics). 요청 수·응답 시간 등을 자동으로 수집
+Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 BASE_DIR = Path(__file__).resolve().parent
 # 저장 위치는 TODO_DATA_FILE 환경변수로 바꿀 수 있다 (컨테이너에서는 쓰기 전용 디렉터리를 가리킨다)
