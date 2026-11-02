@@ -72,6 +72,21 @@ services:
       - ALL
     # ports 없음: Prometheus가 내부 네트워크(node-exporter:9100)로 수집하므로 외부 공개 불필요
 
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6      # latest 대신 버전 고정 (v0.53.0부터 ghcr.io로 이전, gcr.io/cadvisor는 구버전)
+    container_name: cadvisor
+    privileged: true                            # 컨테이너별 CPU·메모리 통계를 읽으려면 필요 (공식 예제 설정)
+    devices:
+      - /dev/kmsg
+    volumes:                                    # 호스트·Docker 상태를 읽기 전용(:ro)으로 마운트
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    restart: unless-stopped
+    # ports 없음: 8080은 Jenkins와 겹치고 cAdvisor 화면은 로그인 기능이 없음. Prometheus가 cadvisor:8080으로 수집
+
 volumes:
   sonarqube_data:
   sonarqube_extensions:
