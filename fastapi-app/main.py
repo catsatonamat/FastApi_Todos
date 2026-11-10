@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
@@ -52,6 +53,13 @@ class TodoItem(BaseModel):
 
 
 # ---------- JSON 파일 읽기/쓰기 헬퍼 ----------
+# 요청은 스레드풀에서 동시에 처리되므로, 파일을 읽고-고치고-쓰는 동안 다른 요청이 끼어들면
+# 같은 id가 두 번 발급되거나 다른 요청의 변경이 덮어써져 사라진다.
+# 엔드포인트마다 이 잠금 안에서 load → 수정 → save 를 한 번에 처리한다.
+# (uvicorn 워커 1개 기준. 워커를 여러 개 띄우면 프로세스 간 잠금이나 DB가 필요하다)
+_todos_lock = threading.Lock()
+
+
 def load_todos() -> list[dict]:
     """todo.json을 읽어 리스트로 반환. 없으면 빈 배열로 생성한다."""
     if not DATA_FILE.exists():
@@ -105,7 +113,8 @@ def index():
 @app.get("/todos", response_model=list[TodoItem])
 def read_todos():
     """전체 To-Do 항목 조회 (Read). 우선순위(order) 순으로 정렬한다."""
-    return sorted(load_todos(), key=lambda t: t.get("order", 0))
+    with _todos_lock:
+        return sorted(load_todos(), key=lambda t: t.get("order", 0))
 
 
 @app.post(
@@ -116,54 +125,57 @@ def read_todos():
 )
 def create_todo(todo: TodoIn):
     """새 To-Do 항목 추가 (Create). 서버가 id와 순서(order)를 부여한다."""
-    todos = load_todos()
-    if len(todos) >= MAX_TODOS:
-        raise HTTPException(
-            status_code=409,
-            detail=f"할 일은 최대 {MAX_TODOS}개까지 저장할 수 있습니다.",
+    with _todos_lock:
+        todos = load_todos()
+        if len(todos) >= MAX_TODOS:
+            raise HTTPException(
+                status_code=409,
+                detail=f"할 일은 최대 {MAX_TODOS}개까지 저장할 수 있습니다.",
+            )
+        item = TodoItem(
+            id=next_id(todos),
+            order=next_order(todos),
+            **todo.model_dump(exclude={"order"}),
         )
-    item = TodoItem(
-        id=next_id(todos),
-        order=next_order(todos),
-        **todo.model_dump(exclude={"order"}),
-    )
-    todos.append(item.model_dump(mode="json"))
-    save_todos(todos)
-    return item
+        todos.append(item.model_dump(mode="json"))
+        save_todos(todos)
+        return item
 
 
 @app.put("/todos/{todo_id}", response_model=TodoItem)
 def update_todo(todo_id: int, todo: TodoIn):
     """기존 To-Do 항목 수정 (Update)."""
-    todos = load_todos()
-    for i, t in enumerate(todos):
-        if t["id"] == todo_id:
-            updated = TodoItem(id=todo_id, **todo.model_dump())
-            todos[i] = updated.model_dump(mode="json")
-            save_todos(todos)
-            return updated
-    raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
+    with _todos_lock:
+        todos = load_todos()
+        for i, t in enumerate(todos):
+            if t["id"] == todo_id:
+                updated = TodoItem(id=todo_id, **todo.model_dump())
+                todos[i] = updated.model_dump(mode="json")
+                save_todos(todos)
+                return updated
+        raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
 
 
 @app.put("/todos/{todo_id}/move", response_model=list[TodoItem])
 def move_todo(todo_id: int, direction: Literal["up", "down"]):
-    """항목의 우선순위(order)를 이웃 항목과 맞바꾼다. 파일을 한 번만 읽고 써서
-    동시 요청으로 인한 경쟁 상태(race condition)를 방지한다."""
-    todos = sorted(load_todos(), key=lambda t: t.get("order", 0))
-    idx = next((i for i, t in enumerate(todos) if t["id"] == todo_id), None)
-    if idx is None:
-        raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
+    """항목의 우선순위(order)를 이웃 항목과 맞바꾼다. 읽기·수정·쓰기를 한 번의
+    잠금 안에서 처리해 동시 요청으로 인한 경쟁 상태(race condition)를 방지한다."""
+    with _todos_lock:
+        todos = sorted(load_todos(), key=lambda t: t.get("order", 0))
+        idx = next((i for i, t in enumerate(todos) if t["id"] == todo_id), None)
+        if idx is None:
+            raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
 
-    target_idx = idx - 1 if direction == "up" else idx + 1
-    if 0 <= target_idx < len(todos):
-        todos[idx]["order"], todos[target_idx]["order"] = (
-            todos[target_idx]["order"],
-            todos[idx]["order"],
-        )
-        todos.sort(key=lambda t: t.get("order", 0))
-        save_todos(todos)
+        target_idx = idx - 1 if direction == "up" else idx + 1
+        if 0 <= target_idx < len(todos):
+            todos[idx]["order"], todos[target_idx]["order"] = (
+                todos[target_idx]["order"],
+                todos[idx]["order"],
+            )
+            todos.sort(key=lambda t: t.get("order", 0))
+            save_todos(todos)
 
-    return todos
+        return todos
 
 
 @app.put(
@@ -174,26 +186,28 @@ def move_todo(todo_id: int, direction: Literal["up", "down"]):
 def reorder_todo(todo_id: int, position: Annotated[int, Query(ge=0)]):
     """항목을 목록의 position번째(0부터) 자리로 옮기고 order를 0부터 다시 매긴다.
     position이 목록 길이를 넘으면 맨 끝으로 옮긴다."""
-    todos = sorted(load_todos(), key=lambda t: t.get("order", 0))
-    idx = next((i for i, t in enumerate(todos) if t["id"] == todo_id), None)
-    if idx is None:
-        raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
+    with _todos_lock:
+        todos = sorted(load_todos(), key=lambda t: t.get("order", 0))
+        idx = next((i for i, t in enumerate(todos) if t["id"] == todo_id), None)
+        if idx is None:
+            raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
 
-    item = todos.pop(idx)
-    todos.insert(min(position, len(todos)), item)
-    for i, t in enumerate(todos):
-        t["order"] = i
-    save_todos(todos)
+        item = todos.pop(idx)
+        todos.insert(min(position, len(todos)), item)
+        for i, t in enumerate(todos):
+            t["order"] = i
+        save_todos(todos)
 
-    return todos
+        return todos
 
 
 @app.delete("/todos/{todo_id}", status_code=204)
 def delete_todo(todo_id: int):
     """To-Do 항목 삭제 (Delete)."""
-    todos = load_todos()
-    new_todos = [t for t in todos if t["id"] != todo_id]
-    if len(new_todos) == len(todos):
-        raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
-    save_todos(new_todos)
-    return None
+    with _todos_lock:
+        todos = load_todos()
+        new_todos = [t for t in todos if t["id"] != todo_id]
+        if len(new_todos) == len(todos):
+            raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
+        save_todos(new_todos)
+        return None

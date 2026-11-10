@@ -459,3 +459,33 @@ def test_move_keeps_due_date():
     client.put("/todos/2/move", params={"direction": "up"})
     moved_a = next(t for t in load_todos() if t["id"] == 1)
     assert moved_a["due_date"] == "2027-02-02"
+
+
+# ---------- 동시 요청 (경쟁 상태) ----------
+
+def test_concurrent_creates_get_unique_ids_and_are_all_saved():
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        responses = list(pool.map(lambda i: client.post("/todos", json={"title": f"T{i}"}), range(50)))
+
+    assert all(r.status_code == 201 for r in responses)
+    ids = [r.json()["id"] for r in responses]
+    assert len(set(ids)) == 50
+    assert len(load_todos()) == 50
+
+
+def test_concurrent_create_and_delete_keeps_existing_items():
+    from concurrent.futures import ThreadPoolExecutor
+
+    seed("Keep A", "Keep B")
+
+    def create_then_delete(i):
+        created = client.post("/todos", json={"title": f"T{i}"})
+        return client.delete(f"/todos/{created.json()['id']}").status_code
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        codes = list(pool.map(create_then_delete, range(50)))
+
+    assert codes == [204] * 50
+    assert sorted_titles() == ["Keep A", "Keep B"]
