@@ -11,6 +11,9 @@ services:
       - no-new-privileges:true    # 컨테이너 안에서 권한 상승 차단
     cap_drop:
       - ALL                       # 불필요한 커널 권한 모두 제거
+    networks:
+      - default                   # Prometheus가 fastapi-app:8000으로 수집
+      - loadtest-net              # JMeter가 fastapi-app:8000으로 부하 테스트
 
   sonarqube:
     image: sonarqube:26.9.0.129388-community
@@ -21,6 +24,7 @@ services:
     environment:
       - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
     volumes:                                    # ← 추가: 볼륨을 컨테이너 경로에 마운트
+      - sonarqube_conf:/opt/sonarqube/conf      # 설정 파일 유지 (컨테이너를 다시 만들어도 유지)
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
@@ -56,11 +60,13 @@ services:
       - "3000:3000"
     environment:
       - GF_AUTH_BASIC_PASSWORD_POLICY=true      # 비밀번호 12자 이상 + 대·소문자·숫자·특수문자 필수
+      - GF_USERS_ALLOW_SIGN_UP=false            # 회원가입 비활성화
+      - GF_AUTH_ANONYMOUS_ENABLED=false         # 로그인 없이 보기 금지
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
       - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
       - GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false
     volumes:
-      - grafana-data:/var/lib/grafana 
+      - grafana-data:/var/lib/grafana
 
   node-exporter:
     image: prom/node-exporter:v1.12.1           # latest 대신 버전 고정
@@ -87,10 +93,38 @@ services:
     restart: unless-stopped
     # ports 없음: 8080은 Jenkins와 겹치고 cAdvisor 화면은 로그인 기능이 없음. Prometheus가 cadvisor:8080으로 수집
 
+  jmeter:
+    build:
+      context: ./jmeter
+      dockerfile: Dockerfile
+    container_name: jmeter
+    volumes:
+      - ./jmeter:/jmeter
+    command:
+      - jmeter
+      - -n
+      - -t
+      - /jmeter/fastapi_test_plan.jmx
+      - -l
+      - /jmeter/results.jtl
+      - -JTARGET_HOST=fastapi-app
+      - -JTARGET_PORT=8000
+      - -Jjmeter.save.saveservice.output_format=csv
+      - -e
+      - -o
+      - /jmeter/report
+    networks:
+      - loadtest-net              # fastapi-app에만 접근 (모니터링 서비스와 분리)
+
+networks:
+  loadtest-net:
+    driver: bridge
+
 volumes:
+  sonarqube_conf:
   sonarqube_data:
   sonarqube_extensions:
   sonarqube_logs:
   sonarqube_temp:
-  prometheus-data: 
+  prometheus-data:
   grafana-data: 
