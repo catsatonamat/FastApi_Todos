@@ -59,20 +59,84 @@
       </HeaderManager>
       <hashTree/>
 
-      <!-- Thread Group: 사용자 10명, 10초 램프업, 1회 루프 -->
+      <!-- Backend Listener: 샘플 결과를 InfluxDB(1.x)로 실시간 전송 → Grafana 대시보드(ID 5496)에서 조회
+           InfluxDB 에 접속하지 못해도 테스트는 계속 진행되고 로그에 오류만 남는다. -->
+      <BackendListener guiclass="BackendListenerGui" testclass="BackendListener" testname="Backend Listener (InfluxDB)" enabled="true">
+        <elementProp name="arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments">
+          <collectionProp name="Arguments.arguments">
+            <elementProp name="influxdbMetricsSender" elementType="Argument">
+              <stringProp name="Argument.name">influxdbMetricsSender</stringProp>
+              <stringProp name="Argument.value">org.apache.jmeter.visualizers.backend.influxdb.HttpMetricsSender</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+            <elementProp name="influxdbUrl" elementType="Argument">
+              <stringProp name="Argument.name">influxdbUrl</stringProp>
+              <stringProp name="Argument.value">${__P(INFLUXDB_URL,http://influxdb:8086/write?db=jmeter)}</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+            <elementProp name="application" elementType="Argument">
+              <stringProp name="Argument.name">application</stringProp>
+              <stringProp name="Argument.value">fastapi-todo</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+            <elementProp name="measurement" elementType="Argument">
+              <stringProp name="Argument.name">measurement</stringProp>
+              <stringProp name="Argument.value">jmeter</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+            <elementProp name="summaryOnly" elementType="Argument">
+              <stringProp name="Argument.name">summaryOnly</stringProp>
+              <stringProp name="Argument.value">false</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+            <elementProp name="samplersRegex" elementType="Argument">
+              <stringProp name="Argument.name">samplersRegex</stringProp>
+              <stringProp name="Argument.value">.*</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+            <elementProp name="percentiles" elementType="Argument">
+              <stringProp name="Argument.name">percentiles</stringProp>
+              <stringProp name="Argument.value">90;95;99</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+            <elementProp name="testTitle" elementType="Argument">
+              <stringProp name="Argument.name">testTitle</stringProp>
+              <stringProp name="Argument.value">FastAPI Performance Test</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+            <elementProp name="eventTags" elementType="Argument">
+              <stringProp name="Argument.name">eventTags</stringProp>
+              <stringProp name="Argument.value"></stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+          </collectionProp>
+        </elementProp>
+        <stringProp name="classname">org.apache.jmeter.visualizers.backend.influxdb.InfluxdbBackendListenerClient</stringProp>
+      </BackendListener>
+      <hashTree/>
+
+      <!-- Thread Group: 사용자 10명, 10초 램프업, 60초 동안 반복 (그래프가 그려질 만큼 길게)
+           -JTHREADS=, -JDURATION= 으로 바꿀 수 있다. -->
       <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="FastAPI Load Test" enabled="true">
         <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
         <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
           <boolProp name="LoopController.continue_forever">false</boolProp>
-          <stringProp name="LoopController.loops">1</stringProp>
+          <stringProp name="LoopController.loops">-1</stringProp>
         </elementProp>
-        <stringProp name="ThreadGroup.num_threads">10</stringProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(THREADS,10)}</stringProp>
         <stringProp name="ThreadGroup.ramp_time">10</stringProp>
-        <boolProp name="ThreadGroup.scheduler">false</boolProp>
-        <stringProp name="ThreadGroup.duration"></stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">${__P(DURATION,60)}</stringProp>
         <stringProp name="ThreadGroup.delay"></stringProp>
       </ThreadGroup>
       <hashTree>
+
+        <!-- 요청 사이 1초 대기: 사용자 1명당 초당 약 1건 → 전체 약 10건/초.
+             대기 없이 돌리면 POST /todos 가 순식간에 MAX_TODOS(1000) 에 걸려 409 가 난다. -->
+        <ConstantTimer guiclass="ConstantTimerGui" testclass="ConstantTimer" testname="Think Time 1s" enabled="true">
+          <stringProp name="ConstantTimer.delay">1000</stringProp>
+        </ConstantTimer>
+        <hashTree/>
 
         <!-- 샘플러 1: GET / (To-Do 페이지) -->
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="GET /" enabled="true">
@@ -138,6 +202,14 @@
             <intProp name="Assertion.test_type">1</intProp>
           </ResponseAssertion>
           <hashTree/>
+          <!-- 응답의 id 를 todo_id 변수에 저장 → 아래 DELETE 에서 사용 -->
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract todo_id" enabled="true">
+            <stringProp name="JSONPostProcessor.referenceNames">todo_id</stringProp>
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$.id</stringProp>
+            <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
+            <stringProp name="JSONPostProcessor.defaultValues">NOT_FOUND</stringProp>
+          </JSONPostProcessor>
+          <hashTree/>
         </hashTree>
 
         <!-- 샘플러 3: GET /todos (목록 조회) -->
@@ -160,6 +232,35 @@
           <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert 200" enabled="true">
             <collectionProp name="Asserion.test_strings">
               <stringProp name="49586">200</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">8</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+
+        <!-- 샘플러 4: DELETE /todos/{id} (방금 만든 To-Do 삭제)
+             테스트를 반복해도 데이터가 쌓이지 않아 MAX_TODOS(1000) 의 409 에 걸리지 않는다. -->
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="DELETE /todos/{id}" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="HTTPSampler.domain"></stringProp>
+          <stringProp name="HTTPSampler.port"></stringProp>
+          <stringProp name="HTTPSampler.protocol"></stringProp>
+          <stringProp name="HTTPSampler.path">/todos/${todo_id}</stringProp>
+          <stringProp name="HTTPSampler.method">DELETE</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+          <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert 204" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="49803">204</stringProp>
             </collectionProp>
             <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
             <boolProp name="Assertion.assume_success">false</boolProp>

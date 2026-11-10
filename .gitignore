@@ -1,0 +1,7 @@
+# 비밀 값 (Grafana 비밀번호 등)
+.env
+
+# JMeter 실행 결과물 (실행할 때마다 새로 생성)
+jmeter/results.jtl
+jmeter/jmeter.log
+jmeter/report/
