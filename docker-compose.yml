@@ -26,8 +26,9 @@ services:
     volumes:
       - loki-data:/loki
     networks:
-      - loadtest-net
- 
+      - default                   # Grafana가 loki:3100으로 조회 (Grafana는 default 네트워크에만 있음)
+      - loadtest-net              # Alloy가 loki:3100으로 로그 전송
+
   alloy:
     image: grafana/alloy:v1.21.3
     container_name: alloy
