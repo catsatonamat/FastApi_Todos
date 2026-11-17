@@ -8,6 +8,8 @@ services:
       - "8004:8000"
     environment:
       - PYTHONUNBUFFERED=1        # 로그를 버퍼링 없이 바로 stdout으로 출력
+    volumes:
+      - todo-data:/app/data       # SQLite DB(todo.db) 저장 (컨테이너를 다시 만들어도 유지)
     restart: unless-stopped       # 서버 재부팅·오류 시 자동 재시작
     security_opt:
       - no-new-privileges:true    # 컨테이너 안에서 권한 상승 차단
@@ -173,6 +175,7 @@ networks:
     driver: bridge
 
 volumes:
+  todo-data:
   sonarqube_conf:
   sonarqube_data:
   sonarqube_extensions:

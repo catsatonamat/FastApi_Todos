@@ -1,9 +1,11 @@
 import json
 import logging
 import os
+import sqlite3
 import sys
-import threading
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
@@ -44,8 +46,8 @@ async def log_requests(request: Request, call_next):
     return response
 
 BASE_DIR = Path(__file__).resolve().parent
-# 저장 위치는 TODO_DATA_FILE 환경변수로 바꿀 수 있다 (컨테이너에서는 쓰기 전용 디렉터리를 가리킨다)
-DATA_FILE = Path(os.environ.get("TODO_DATA_FILE", BASE_DIR / "todo.json"))
+# 저장 위치는 TODO_DB_FILE 환경변수로 바꿀 수 있다 (컨테이너에서는 쓰기 가능한 /app/data를 가리킨다)
+DB_FILE = Path(os.environ.get("TODO_DB_FILE", BASE_DIR / "todo.db"))
 TEMPLATES_DIR = BASE_DIR / "templates"
 
 # 입력 제한 (디스크·메모리 소진 방지)
@@ -80,55 +82,123 @@ class TodoItem(BaseModel):
     due_date: date | None = None
 
 
-# ---------- JSON 파일 읽기/쓰기 헬퍼 ----------
-# 요청은 스레드풀에서 동시에 처리되므로, 파일을 읽고-고치고-쓰는 동안 다른 요청이 끼어들면
-# 같은 id가 두 번 발급되거나 다른 요청의 변경이 덮어써져 사라진다.
-# 엔드포인트마다 이 잠금 안에서 load → 수정 → save 를 한 번에 처리한다.
-# (uvicorn 워커 1개 기준. 워커를 여러 개 띄우면 프로세스 간 잠금이나 DB가 필요하다)
-_todos_lock = threading.Lock()
+# ---------- SQLite 저장소 ----------
+# 요청마다 연결을 새로 열고 닫는다 (요청은 스레드풀의 여러 스레드에서 동시에 처리되므로
+# 연결을 스레드끼리 공유하지 않는다).
+# 읽고-고치고-쓰는 엔드포인트는 transaction() 안에서 BEGIN IMMEDIATE로 쓰기 잠금을 먼저 잡는다.
+# 그래서 동시 요청이 와도 같은 id·order가 두 번 발급되거나 다른 요청의 변경이 사라지지 않는다.
+# 잠금은 DB 파일에 걸리므로 uvicorn 워커를 여러 개 띄워도 그대로 동작한다.
+# ("order"는 SQL 예약어라 컬럼 이름은 sort_order로 두고, 밖으로는 order로 내보낸다)
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS todos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT    NOT NULL,
+    description TEXT    NOT NULL DEFAULT '',
+    done        INTEGER NOT NULL DEFAULT 0,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    due_date    TEXT
+)
+"""
+COLUMNS = "id, title, description, done, sort_order, due_date"
+BUSY_TIMEOUT_SECONDS = 5   # 다른 요청이 쓰기 잠금을 잡고 있으면 최대 이만큼 기다린다
 
 
-def load_todos() -> list[dict]:
-    """todo.json을 읽어 리스트로 반환. 없으면 빈 배열로 생성한다."""
-    if not DATA_FILE.exists():
-        DATA_FILE.write_text("[]", encoding="utf-8")
-        return []
+def _connect() -> sqlite3.Connection:
+    # isolation_level=None: 트랜잭션을 BEGIN/COMMIT으로 직접 관리한다
+    conn = sqlite3.connect(DB_FILE, timeout=BUSY_TIMEOUT_SECONDS, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute(SCHEMA)
+    return conn
+
+
+@contextmanager
+def transaction() -> Generator[sqlite3.Connection]:
+    """쓰기 잠금을 잡고 시작해, 블록이 끝나면 커밋하고 예외가 나면 되돌린다."""
+    conn = _connect()
     try:
-        todos = json.loads(DATA_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        # 파일이 비었거나 손상된 경우 빈 배열로 초기화
-        DATA_FILE.write_text("[]", encoding="utf-8")
-        return []
-
-    # 기존 데이터에 order 필드가 없으면 등록 순서를 기준으로 채워 넣는다
-    backfilled = False
-    for i, t in enumerate(todos):
-        if "order" not in t:
-            t["order"] = i
-            backfilled = True
-    if backfilled:
-        save_todos(todos)
-    return todos
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
 
 
-def save_todos(todos: list[dict]) -> None:
-    DATA_FILE.write_text(
-        json.dumps(todos, ensure_ascii=False, indent=2), encoding="utf-8"
+def _row_to_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "description": row["description"],
+        "done": bool(row["done"]),
+        "order": row["sort_order"],
+        "due_date": row["due_date"],
+    }
+
+
+def _to_row(t: dict) -> tuple:
+    """dict(또는 model_dump(mode="json") 결과)를 INSERT용 값 묶음으로 바꾼다."""
+    return (
+        t["id"],
+        t["title"],
+        t.get("description", ""),
+        int(bool(t.get("done", False))),
+        t.get("order", 0),
+        t.get("due_date"),
     )
 
 
-def next_id(todos: list[dict]) -> int:
-    """현재 목록에서 가장 큰 id + 1 을 반환."""
-    return max((t["id"] for t in todos), default=0) + 1
+def _fetch_sorted(conn: sqlite3.Connection) -> list[dict]:
+    """우선순위(order) 순으로 전체 항목을 읽는다. order가 같으면 먼저 등록된(id가 작은) 것이 앞."""
+    rows = conn.execute(f"SELECT {COLUMNS} FROM todos ORDER BY sort_order, id")
+    return [_row_to_dict(r) for r in rows]
 
 
-def next_order(todos: list[dict]) -> int:
-    """현재 목록에서 가장 큰 order + 1 을 반환."""
-    return max((t.get("order", 0) for t in todos), default=-1) + 1
+def load_todos() -> list[dict]:
+    """전체 항목을 id 순(등록 순)으로 반환한다."""
+    conn = _connect()
+    try:
+        rows = conn.execute(f"SELECT {COLUMNS} FROM todos ORDER BY id")
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
-# 서버 시작 시 todo.json이 없으면 빈 배열로 생성
-load_todos()
+def save_todos(todos: list[dict]) -> None:
+    """저장된 항목 전체를 주어진 목록으로 바꾼다 (테스트 데이터 준비·JSON 이전에 사용)."""
+    with transaction() as conn:
+        conn.execute("DELETE FROM todos")
+        conn.executemany(
+            f"INSERT INTO todos ({COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)",
+            [_to_row(t) for t in todos],
+        )
+
+
+def init_db() -> None:
+    """DB를 만들고, DB가 처음 생길 때 같은 폴더의 todo.json이 있으면 그 데이터를 옮겨 온다.
+    todo.json은 지우지 않고 그대로 둔다 (DB가 이미 있으면 다시 옮기지 않는다)."""
+    is_new = not DB_FILE.exists()
+    _connect().close()
+    legacy_file = DB_FILE.with_name("todo.json")
+    if not (is_new and legacy_file.exists()):
+        return
+    try:
+        legacy = json.loads(legacy_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        logging.getLogger(__name__).warning("%s를 읽을 수 없어 옮기지 않았습니다.", legacy_file)
+        return
+    # 예전 데이터에 order가 없으면 등록 순서를 기준으로 채워 넣는다
+    save_todos([{**t, "order": t.get("order", i)} for i, t in enumerate(legacy)])
+
+
+# 서버 시작 시 DB(테이블)가 없으면 만든다
+init_db()
+
+
+def _not_found() -> HTTPException:
+    return HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
 
 
 # ---------- 엔드포인트 ----------
@@ -141,8 +211,11 @@ def index():
 @app.get("/todos", response_model=list[TodoItem])
 def read_todos():
     """전체 To-Do 항목 조회 (Read). 우선순위(order) 순으로 정렬한다."""
-    with _todos_lock:
-        return sorted(load_todos(), key=lambda t: t.get("order", 0))
+    conn = _connect()
+    try:
+        return _fetch_sorted(conn)
+    finally:
+        conn.close()
 
 
 @app.post(
@@ -153,55 +226,56 @@ def read_todos():
 )
 def create_todo(todo: TodoIn):
     """새 To-Do 항목 추가 (Create). 서버가 id와 순서(order)를 부여한다."""
-    with _todos_lock:
-        todos = load_todos()
-        if len(todos) >= MAX_TODOS:
+    with transaction() as conn:
+        count, max_order = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(sort_order), -1) FROM todos"
+        ).fetchone()
+        if count >= MAX_TODOS:
             raise HTTPException(
                 status_code=409,
                 detail=f"할 일은 최대 {MAX_TODOS}개까지 저장할 수 있습니다.",
             )
-        item = TodoItem(
-            id=next_id(todos),
-            order=next_order(todos),
-            **todo.model_dump(exclude={"order"}),
+        data = todo.model_dump(mode="json", exclude={"order"})
+        cur = conn.execute(
+            "INSERT INTO todos (title, description, done, sort_order, due_date) VALUES (?, ?, ?, ?, ?)",
+            (data["title"], data["description"], int(data["done"]), max_order + 1, data["due_date"]),
         )
-        todos.append(item.model_dump(mode="json"))
-        save_todos(todos)
-        return item
+        return TodoItem(id=cur.lastrowid, order=max_order + 1, **todo.model_dump(exclude={"order"}))
 
 
 @app.put("/todos/{todo_id}", response_model=TodoItem)
 def update_todo(todo_id: int, todo: TodoIn):
     """기존 To-Do 항목 수정 (Update)."""
-    with _todos_lock:
-        todos = load_todos()
-        for i, t in enumerate(todos):
-            if t["id"] == todo_id:
-                updated = TodoItem(id=todo_id, **todo.model_dump())
-                todos[i] = updated.model_dump(mode="json")
-                save_todos(todos)
-                return updated
-        raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
+    data = todo.model_dump(mode="json")
+    with transaction() as conn:
+        cur = conn.execute(
+            "UPDATE todos SET title = ?, description = ?, done = ?, sort_order = ?, due_date = ? WHERE id = ?",
+            (data["title"], data["description"], int(data["done"]), data["order"], data["due_date"], todo_id),
+        )
+        if cur.rowcount == 0:
+            raise _not_found()
+    return TodoItem(id=todo_id, **todo.model_dump())
 
 
 @app.put("/todos/{todo_id}/move", response_model=list[TodoItem])
 def move_todo(todo_id: int, direction: Literal["up", "down"]):
-    """항목의 우선순위(order)를 이웃 항목과 맞바꾼다. 읽기·수정·쓰기를 한 번의
-    잠금 안에서 처리해 동시 요청으로 인한 경쟁 상태(race condition)를 방지한다."""
-    with _todos_lock:
-        todos = sorted(load_todos(), key=lambda t: t.get("order", 0))
+    """항목의 우선순위(order)를 이웃 항목과 맞바꾼다. 읽기·수정·쓰기를 한 트랜잭션 안에서
+    처리해 동시 요청으로 인한 경쟁 상태(race condition)를 방지한다."""
+    with transaction() as conn:
+        todos = _fetch_sorted(conn)
         idx = next((i for i, t in enumerate(todos) if t["id"] == todo_id), None)
         if idx is None:
-            raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
+            raise _not_found()
 
         target_idx = idx - 1 if direction == "up" else idx + 1
         if 0 <= target_idx < len(todos):
-            todos[idx]["order"], todos[target_idx]["order"] = (
-                todos[target_idx]["order"],
-                todos[idx]["order"],
+            a, b = todos[idx], todos[target_idx]
+            a["order"], b["order"] = b["order"], a["order"]
+            conn.executemany(
+                "UPDATE todos SET sort_order = ? WHERE id = ?",
+                [(a["order"], a["id"]), (b["order"], b["id"])],
             )
-            todos.sort(key=lambda t: t.get("order", 0))
-            save_todos(todos)
+            todos.sort(key=lambda t: t["order"])
 
         return todos
 
@@ -214,17 +288,20 @@ def move_todo(todo_id: int, direction: Literal["up", "down"]):
 def reorder_todo(todo_id: int, position: Annotated[int, Query(ge=0)]):
     """항목을 목록의 position번째(0부터) 자리로 옮기고 order를 0부터 다시 매긴다.
     position이 목록 길이를 넘으면 맨 끝으로 옮긴다."""
-    with _todos_lock:
-        todos = sorted(load_todos(), key=lambda t: t.get("order", 0))
+    with transaction() as conn:
+        todos = _fetch_sorted(conn)
         idx = next((i for i, t in enumerate(todos) if t["id"] == todo_id), None)
         if idx is None:
-            raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
+            raise _not_found()
 
         item = todos.pop(idx)
         todos.insert(min(position, len(todos)), item)
         for i, t in enumerate(todos):
             t["order"] = i
-        save_todos(todos)
+        conn.executemany(
+            "UPDATE todos SET sort_order = ? WHERE id = ?",
+            [(t["order"], t["id"]) for t in todos],
+        )
 
         return todos
 
@@ -232,10 +309,8 @@ def reorder_todo(todo_id: int, position: Annotated[int, Query(ge=0)]):
 @app.delete("/todos/{todo_id}", status_code=204)
 def delete_todo(todo_id: int):
     """To-Do 항목 삭제 (Delete)."""
-    with _todos_lock:
-        todos = load_todos()
-        new_todos = [t for t in todos if t["id"] != todo_id]
-        if len(new_todos) == len(todos):
-            raise HTTPException(status_code=404, detail="해당 id의 항목을 찾을 수 없습니다.")
-        save_todos(new_todos)
-        return None
+    with transaction() as conn:
+        cur = conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+        if cur.rowcount == 0:
+            raise _not_found()
+    return None

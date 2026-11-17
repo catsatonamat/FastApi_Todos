@@ -1,2 +1,5 @@
 __pycache__/
 venv/
+# 로컬 실행·테스트 때 생기는 SQLite DB
+todo.db
+todo.db-journal

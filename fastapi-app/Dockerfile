@@ -24,8 +24,9 @@ RUN pip install -r requirements.txt
 COPY main.py ./
 COPY templates/ ./templates/
 
-# 할 일 데이터는 appuser가 쓸 수 있는 /app/data에 저장 (파일이 없으면 앱이 시작할 때 빈 목록으로 만든다)
-ENV TODO_DATA_FILE=/app/data/todo.json
+# 할 일 데이터는 appuser가 쓸 수 있는 /app/data의 SQLite DB에 저장 (없으면 앱이 시작할 때 만든다)
+# /app/data는 docker-compose에서 볼륨으로 연결해, 컨테이너를 다시 만들어도 데이터가 남게 한다
+ENV TODO_DB_FILE=/app/data/todo.db
 
 # 이후 명령은 appuser 권한으로 실행
 USER appuser

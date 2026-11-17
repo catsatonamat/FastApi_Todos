@@ -12,14 +12,14 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def isolated_data_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(main, "DATA_FILE", tmp_path / "todo.json")
+def isolated_db_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB_FILE", tmp_path / "todo.db")
     save_todos([])
     yield
 
 
-def make_todo(id, title="Test", description="", done=False, order=0):
-    return {"id": id, "title": title, "description": description, "done": done, "order": order}
+def make_todo(id, title="Test", description="", done=False, order=0, due_date=None):
+    return {"id": id, "title": title, "description": description, "done": done, "order": order, "due_date": due_date}
 
 
 def seed(*titles):
@@ -54,36 +54,56 @@ def test_todo_item_keeps_all_fields():
     assert item.model_dump() == {"id": 5, "title": "T", "description": "D", "done": True, "order": 3, "due_date": date(2026, 1, 2)}
 
 
-# ---------- 상태관리 (JSON 파일 저장/로드) ----------
+# ---------- 상태관리 (SQLite 저장/로드) ----------
 
 def test_save_and_load_roundtrip():
-    todos = [make_todo(1, "A"), make_todo(2, "B", order=1)]
+    todos = [make_todo(1, "A"), make_todo(2, "B", done=True, order=1, due_date="2027-01-01")]
     save_todos(todos)
     assert load_todos() == todos
 
 
-def test_load_todos_creates_file_when_missing():
-    main.DATA_FILE.unlink()
+def test_load_todos_creates_db_when_missing():
+    main.DB_FILE.unlink()
     assert load_todos() == []
-    assert main.DATA_FILE.exists()
+    assert main.DB_FILE.exists()
 
 
-def test_load_todos_recovers_from_corrupt_file():
-    main.DATA_FILE.write_text("{not json", encoding="utf-8")
-    assert load_todos() == []
-    assert json.loads(main.DATA_FILE.read_text(encoding="utf-8")) == []
-
-
-def test_load_todos_backfills_missing_order_and_persists():
+def test_init_db_migrates_legacy_json_and_backfills_order():
     legacy = [{"id": 1, "title": "old1", "description": "", "done": False},
-              {"id": 2, "title": "old2", "description": "", "done": True}]
-    main.DATA_FILE.write_text(json.dumps(legacy), encoding="utf-8")
+              {"id": 5, "title": "old2", "description": "", "done": True, "due_date": "2027-03-03"}]
+    main.DB_FILE.unlink()
+    main.DB_FILE.with_name("todo.json").write_text(json.dumps(legacy), encoding="utf-8")
 
-    todos = load_todos()
+    main.init_db()
 
-    assert [t["order"] for t in todos] == [0, 1]
-    saved = json.loads(main.DATA_FILE.read_text(encoding="utf-8"))
-    assert [t["order"] for t in saved] == [0, 1]
+    assert load_todos() == [make_todo(1, "old1", order=0),
+                            make_todo(5, "old2", done=True, order=1, due_date="2027-03-03")]
+    # 옮긴 뒤 새로 만든 항목은 기존 id 다음 번호를 받는다
+    assert client.post("/todos", json={"title": "new"}).json()["id"] == 6
+
+
+def test_init_db_does_not_migrate_again_when_db_exists():
+    seed("A")
+    main.DB_FILE.with_name("todo.json").write_text(json.dumps([make_todo(1, "old")]), encoding="utf-8")
+
+    main.init_db()
+
+    assert sorted_titles() == ["A"]
+
+
+def test_init_db_skips_corrupt_legacy_json():
+    main.DB_FILE.unlink()
+    main.DB_FILE.with_name("todo.json").write_text("{not json", encoding="utf-8")
+
+    main.init_db()
+
+    assert load_todos() == []
+
+
+def test_deleted_id_is_not_reused():
+    seed("A", "B")
+    client.delete("/todos/2")
+    assert client.post("/todos", json={"title": "C"}).json()["id"] == 3
 
 
 def test_created_item_is_persisted_and_readable():
@@ -305,11 +325,10 @@ def test_move_bottom_item_down_is_noop():
     assert sorted_titles() == ["A", "B"]
 
 
-def test_move_persists_order_to_json_file():
+def test_move_persists_order_to_db():
     seed("A", "B", "C")
     client.put("/todos/3/move", params={"direction": "up"})
-    saved = json.loads(main.DATA_FILE.read_text(encoding="utf-8"))
-    order_by_id = {t["id"]: t["order"] for t in saved}
+    order_by_id = {t["id"]: t["order"] for t in load_todos()}
     assert order_by_id == {1: 0, 3: 1, 2: 2}
 
 
@@ -317,7 +336,7 @@ def test_move_keeps_item_fields_intact():
     save_todos([make_todo(1, "A", "desc-a", done=True, order=0), make_todo(2, "B", "desc-b", order=1)])
     client.put("/todos/2/move", params={"direction": "up"})
     moved = next(t for t in load_todos() if t["id"] == 2)
-    assert moved == {"id": 2, "title": "B", "description": "desc-b", "done": False, "order": 0}
+    assert moved == {"id": 2, "title": "B", "description": "desc-b", "done": False, "order": 0, "due_date": None}
 
 
 def test_move_not_found():
@@ -369,8 +388,7 @@ def test_reorder_position_past_end_moves_to_last():
 def test_reorder_renumbers_orders_from_zero():
     save_todos([make_todo(1, "A", order=5), make_todo(2, "B", order=5), make_todo(3, "C", order=-2)])
     client.put("/todos/1/reorder", params={"position": 0})
-    saved = json.loads(main.DATA_FILE.read_text(encoding="utf-8"))
-    assert {t["id"]: t["order"] for t in saved} == {1: 0, 3: 1, 2: 2}
+    assert {t["id"]: t["order"] for t in load_todos()} == {1: 0, 3: 1, 2: 2}
 
 
 def test_reorder_keeps_item_fields_intact():
@@ -416,8 +434,7 @@ def test_create_todo_with_due_date_stores_iso_string():
     response = client.post("/todos", json={"title": "Test", "due_date": "2026-10-10"})
     assert response.status_code == 201
     assert response.json()["due_date"] == "2026-10-10"
-    saved = json.loads(main.DATA_FILE.read_text(encoding="utf-8"))
-    assert saved[0]["due_date"] == "2026-10-10"
+    assert load_todos()[0]["due_date"] == "2026-10-10"
 
 
 def test_create_todo_without_due_date_is_null():
