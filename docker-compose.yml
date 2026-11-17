@@ -6,6 +6,8 @@ services:
     container_name: FastApi-app
     ports:
       - "8004:8000"
+    environment:
+      - PYTHONUNBUFFERED=1        # 로그를 버퍼링 없이 바로 stdout으로 출력
     restart: unless-stopped       # 서버 재부팅·오류 시 자동 재시작
     security_opt:
       - no-new-privileges:true    # 컨테이너 안에서 권한 상승 차단
@@ -14,6 +16,36 @@ services:
     networks:
       - default                   # Prometheus가 fastapi-app:8000으로 수집
       - loadtest-net              # JMeter가 fastapi-app:8000으로 부하 테스트
+
+  loki:
+    image: grafana/loki:3.7.9
+    container_name: loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - loki-data:/loki
+    networks:
+      - loadtest-net
+ 
+  alloy:
+    image: grafana/alloy:v1.21.3
+    container_name: alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    ports:
+      - "127.0.0.1:12345:12345"
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      - loki
+    networks:
+      - loadtest-net
 
   sonarqube:
     image: sonarqube:26.9.0.129388-community
@@ -148,3 +180,5 @@ volumes:
   prometheus-data:
   grafana-data:
   influxdb-data:
+  loki-data:
+  alloy-data:
